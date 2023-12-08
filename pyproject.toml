@@ -1,0 +1,120 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "susieguy"
+dynamic = ["version"]
+description = ''
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Dong Yuan", email = "dongyuan@usc.edu" },
+  { name = "Nicholas Mancuso", email = "nmancuso@usc.edu" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/unknown/susieguy#readme"
+Issues = "https://github.com/unknown/susieguy/issues"
+Source = "https://github.com/unknown/susieguy"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/susieguy/_version.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/"]
+exclude = ["docs/"]
+
+[tool.hatch.envs.test]
+dependencies = [
+    "coverage[toml]",
+    "pytest",
+    "pytest-cov",
+]
+
+[tool.hatch.envs.test.scripts]
+run-coverage = "pytest --cov-config=pyproject.toml --cov=pkg --cov=tests"
+run = "run-coverage --no-cov"
+
+[[tool.hatch.envs.all.matrix]]
+python = ["3.9", "3.10", "3.11"]
+
+[tool.hatch.envs.lint]
+detached = true
+dependencies = [
+    "black>=23.1.0",
+    "mypy>=1.0.0",
+    "ruff>=0.0.243",
+]
+
+[tool.black]
+target-version = ["py37"]
+line-length = 120
+skip-string-normalization = true
+
+[tool.ruff]
+target-version = "py37"
+line-length = 120
+select = ["E", "F", "I001"]
+ignore = [
+    # Allow non-abstract empty methods in abstract base classes
+    "B027",
+    # Allow boolean positional values in function calls, like `dict.get(... True)`
+    "FBT003",
+    # Ignore checks for possible passwords
+    "S105", "S106", "S107",
+    # Ignore complexity
+    "C901", "PLR0911", "PLR0912", "PLR0913", "PLR0915",
+]
+ignore-init-module-imports = true
+
+[tool.ruff.isort]
+known-first-party = ["susieguy"]
+combine-as-imports = true
+lines-after-imports = 2
+lines-between-types = 1
+known-local-folder = ["src"]
+section-order = ["future", "standard-library", "third-party", "jax-ecosystem", "first-party", "local-folder"]
+extra-standard-library = ["typing_extensions"]
+order-by-type = false
+
+[tool.ruff.isort.sections]
+jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "optimistix"]
+
+[tool.ruff.per-file-ignores]
+# Tests can use magic values, assertions, and relative imports
+"tests/**/*" = ["PLR2004", "S101", "TID252"]
+
+[tool.coverage.run]
+source_pkgs = ["susieguy", "tests"]
+branch = true
+parallel = true
+omit = [
+    "src/susieguy/__about__.py",
+]
+
+[tool.coverage.paths]
+susieguy = ["src/susieguy", "*/susieguy/src/susieguy"]
+tests = ["tests", "*/susieguy/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "no cov",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
