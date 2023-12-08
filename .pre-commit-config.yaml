@@ -30,8 +30,8 @@ repos:
     - id: ruff
       args: [--fix]
 
-- repo: https://github.com/RobertCraigie/pyright-python
-  rev: v1.1.339
-  hooks:
-    - id: pyright
-      additional_dependencies: [ "equinox", "jax", "lineax", "optimistix", "pytest" ]
+#- repo: https://github.com/RobertCraigie/pyright-python
+#  rev: v1.1.339
+#  hooks:
+#    - id: pyright
+#      additional_dependencies: [ "equinox", "jax", "lineax", "optimistix", "pytest" ]

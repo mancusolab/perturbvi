@@ -1,18 +1,6 @@
 from functools import partial
 from typing import get_args, Literal, NamedTuple, Optional, Tuple
 
-from plum import dispatch
-
-# from memory_profiler import profile
-import equinox as eqx
-import lineax as lx
-import optax
-
-from jax import Array, grad, jit, lax, nn, numpy as jnp, random
-from jax.experimental import sparse
-from jax.scipy import special as spec
-from jax.typing import ArrayLike
-
 from common import (
     compute_pip,
     compute_pve,
@@ -20,7 +8,17 @@ from common import (
     ModelParams_Design,
     SuSiEPCAResults_Design,
 )
+from plum import dispatch
 from sparse import SparseMatrix
+
+# from memory_profiler import profile
+import equinox as eqx
+import optax
+
+from jax import Array, grad, jit, lax, nn, numpy as jnp, random
+from jax.experimental import sparse
+from jax.scipy import special as spec
+from jax.typing import ArrayLike
 
 
 __all__ = [
@@ -92,18 +90,17 @@ def _logdet(A: ArrayLike) -> float:
     return ldet
 
 
-def _compute_pi(A: ArrayLike, theta: ArrayLike) -> Array:
+def _compute_pi(A: Array, theta: Array) -> Array:
     return nn.softmax(A @ theta, axis=0).T
 
 
-def _kl_gamma(alpha: ArrayLike, pi: ArrayLike) -> float:
+def _kl_gamma(alpha: Array, pi: Array) -> Array:
     return jnp.sum(spec.xlogy(alpha, alpha) - spec.xlogy(alpha, pi))
 
 
 def _compute_w_moment(params: ModelParams_Design) -> Tuple[Array, Array]:
     trace_var = jnp.sum(
-        params.var_w[:, :, jnp.newaxis] * params.alpha
-        + (params.mu_w**2 * params.alpha * (1 - params.alpha)),
+        params.var_w[:, :, jnp.newaxis] * params.alpha + (params.mu_w**2 * params.alpha * (1 - params.alpha)),
         axis=(-1, 0),
     )
 
@@ -114,9 +111,7 @@ def _compute_w_moment(params: ModelParams_Design) -> Tuple[Array, Array]:
 
 
 # Update posterior mean and variance W
-def _update_w(
-    RtZk: ArrayLike, E_zzk: ArrayLike, params: ModelParams_Design, kdx: int, ldx: int
-) -> ModelParams_Design:
+def _update_w(RtZk: Array, E_zzk: Array, params: ModelParams_Design, kdx: int, ldx: int) -> ModelParams_Design:
     # n_dim, z_dim = params.mu_z.shape
 
     # calculate update_var_w as the new V[w | gamma]
@@ -131,35 +126,41 @@ def _update_w(
         var_w=params.var_w.at[ldx, kdx].set(update_var_wkl),
     )
 
-def _update_beta(ZkG: ArrayLike, G: SparseMatrix,GtG_diag: ArrayLike, params: ModelParams_Design, kdx: int)-> ModelParams_Design:
-    
+
+def _update_beta(
+    ZkG: ArrayLike, G: SparseMatrix, GtG_diag: ArrayLike, params: ModelParams_Design, kdx: int
+) -> ModelParams_Design:
     update_var_beta = jnp.reciprocal(params.tau_beta[kdx] + GtG_diag)
     update_mu_beta = update_var_beta * ZkG
-    
+
     return params._replace(
         mu_beta=params.mu_beta.at[:, kdx].set(update_mu_beta),
         var_beta=params.var_beta.at[:, kdx].set(update_var_beta),
     )
 
+
 def _update_p_hat(params: ModelParams_Design, kdx: int):
-    log_bf = (jnp.log(params.p) - jnp.log(1 - params.p)
-              + 0.5 * (jnp.log(params.var_beta[:,kdx]) + jnp.log(params.tau_beta[kdx])
-                       + (params.mu_beta[:,kdx] ** 2 / params.var_beta[:,kdx])
-                       )
+    log_bf = (
+        jnp.log(params.p)
+        - jnp.log(1 - params.p)
+        + 0.5
+        * (
+            jnp.log(params.var_beta[:, kdx])
+            + jnp.log(params.tau_beta[kdx])
+            + (params.mu_beta[:, kdx] ** 2 / params.var_beta[:, kdx])
+        )
     )
-    #note that p_hat is k by g
+    # note that p_hat is k by g
     p_hat = nn.sigmoid(log_bf)
 
     return params._replace(
-        p_hat=params.p_hat.at[kdx,:].set(p_hat),
+        p_hat=params.p_hat.at[kdx, :].set(p_hat),
     )
 
 
 # Compute log of Bayes factor
 def _log_bf_np(z: ArrayLike, s2: ArrayLike, s0: ArrayLike):
-    return 0.5 * (jnp.log(s2) - jnp.log(s2 + 1 / s0)) + 0.5 * z**2 * (
-        (1 / s0) / (s2 + 1 / s0)
-    )
+    return 0.5 * (jnp.log(s2) - jnp.log(s2 + 1 / s0)) + 0.5 * z**2 * ((1 / s0) / (s2 + 1 / s0))
 
 
 # Update posterior of alpha using Bayes factor
@@ -202,9 +203,7 @@ def _update_alpha_bf_annotation(
 
 # Update Posterior mean and variance of Z
 def _update_z(
-    X: ArrayLike | SparseMatrix,
-    G: ArrayLike | SparseMatrix, 
-    params: ModelParams_Design
+    X: ArrayLike | SparseMatrix, G: ArrayLike | SparseMatrix, params: ModelParams_Design
 ) -> ModelParams_Design:
     E_W, E_WW = _compute_w_moment(params)
     z_dim, _ = E_W.shape
@@ -219,26 +218,26 @@ def _update_z(
 def _update_tau0_mle(params: ModelParams_Design) -> ModelParams_Design:
     # l_dim, z_dim, p_dim = params.mu_w.shape
 
-    est_varw = params.mu_w ** 2 + params.var_w[:, :, jnp.newaxis]
+    est_varw = params.mu_w**2 + params.var_w[:, :, jnp.newaxis]
 
     u_tau_0 = jnp.sum(params.alpha, axis=-1) / jnp.sum(est_varw * params.alpha, axis=-1)
 
     return params._replace(tau_0=u_tau_0)
 
+
 # Update tau_beta based on MLE
 def _update_tau_beta_mle(params: ModelParams_Design) -> ModelParams_Design:
     # l_dim, z_dim, p_dim = params.mu_w.shape
 
-    est_var_beta = params.mu_beta ** 2 + params.var_beta
+    est_var_beta = params.mu_beta**2 + params.var_beta
 
     u_tau_beta = jnp.sum(params.p_hat, axis=-1) / jnp.sum(est_var_beta * params.p_hat.T, axis=0)
 
     return params._replace(tau_beta=u_tau_beta)
 
+
 # Update tau based on MLE
-def _update_tau(
-    X: ArrayLike | SparseMatrix, params: ModelParams_Design
-) -> ModelParams_Design:
+def _update_tau(X: Array | SparseMatrix, params: ModelParams_Design) -> ModelParams_Design:
     n_dim, z_dim = params.mu_z.shape
     l_dim, z_dim, p_dim = params.mu_w.shape
 
@@ -250,11 +249,7 @@ def _update_tau(
 
     # expectation of log likelihood
     # E_ss = params.ssq - 2 * jnp.trace(E_W @ X.T @ params.mu_z) + jnp.trace(E_ZZ @ E_WW)
-    E_ss = (
-        jnp.sum(X**2)
-        - 2 * jnp.trace(E_W @ X.T @ params.mu_z)
-        + jnp.trace(E_ZZ @ E_WW)
-    )
+    E_ss = jnp.sum(X * X) - 2 * jnp.trace(E_W @ X.T @ params.mu_z) + jnp.trace(E_ZZ @ E_WW)
     u_tau = (n_dim * p_dim) / E_ss
 
     return params._replace(tau=u_tau)
@@ -262,7 +257,7 @@ def _update_tau(
 
 def _update_theta(
     params: ModelParams_Design,
-    A: ArrayLike,
+    A: Array,
     lr: float = 1e-2,
     tol: float = 1e-3,
     max_iter: int = 100,
@@ -272,7 +267,7 @@ def _update_theta(
     old_theta = jnp.zeros_like(params.theta)
     opt_state = optimizer.init(params.theta)
 
-    def _loss(theta_i: ArrayLike) -> float:
+    def _loss(theta_i: Array) -> float:
         pi = _compute_pi(A, theta_i)
         return _kl_gamma(params.alpha, pi)
 
@@ -302,10 +297,7 @@ def _update_theta(
 
 
 def compute_elbo(
-    X: ArrayLike | SparseMatrix, 
-    G: ArrayLike | SparseMatrix, 
-    GtG_diag: ArrayLike,
-    params: ModelParams_Design
+    X: ArrayLike | SparseMatrix, G: ArrayLike | SparseMatrix, GtG_diag: ArrayLike, params: ModelParams_Design
 ) -> ELBOResults_Design:
     """Create function to compute evidence lower bound (ELBO)
 
@@ -325,8 +317,8 @@ def compute_elbo(
     # calculate second moment of Z along k, (k x k) matrix
     # E[Z'Z] = V_k[Z] * tr(I_n) + E[Z]'E[Z] = V_k[Z] * n + E[Z]'E[Z]
     E_ZZ = n_dim * params.var_z + params.mu_z.T @ params.mu_z
-    #calculate moment of B, length k vector (in the diagonal)
-    E_BB = jnp.sum((params.mu_beta ** 2 + params.var_beta) * params.p_hat.T, axis=1)
+    # calculate moment of B, length k vector (in the diagonal)
+    E_BB = jnp.sum((params.mu_beta**2 + params.var_beta) * params.p_hat.T, axis=1)
 
     # calculate moment of W
     E_W, E_WW = _compute_w_moment(params)
@@ -351,23 +343,19 @@ def compute_elbo(
     )
     # neg-KL for w
     # awkward indexing to get broadcast working
-    klw_term1 = params.tau_0[:, :, jnp.newaxis] * (
-        params.var_w[:, :, jnp.newaxis] + params.mu_w**2
-    )
-    klw_term2 = (
-        klw_term1
-        - 1.0
-        - (jnp.log(params.tau_0) + jnp.log(params.var_w))[:, :, jnp.newaxis]
-    )
+    klw_term1 = params.tau_0[:, :, jnp.newaxis] * (params.var_w[:, :, jnp.newaxis] + params.mu_w**2)
+    klw_term2 = klw_term1 - 1.0 - (jnp.log(params.tau_0) + jnp.log(params.var_w))[:, :, jnp.newaxis]
     negKL_w = -0.5 * jnp.sum(params.alpha * klw_term2)
 
     # neg-KL for gamma
     negKL_gamma = -_kl_gamma(params.alpha, params.pi)
 
     # neg-KL for beta
-    negKL_beta = -0.5 * jnp.sum((params.mu_beta ** 2 + params.var_beta) * params.tau_beta 
-                                - 1 
-                                - jnp.log(params.var_beta) - jnp.log(params.tau_beta)
+    negKL_beta = -0.5 * jnp.sum(
+        (params.mu_beta**2 + params.var_beta) * params.tau_beta
+        - 1
+        - jnp.log(params.var_beta)
+        - jnp.log(params.tau_beta)
     )
     # neg-KL for eta
     negKL_eta = -_kl_gamma(params.p_hat, params.p)
@@ -392,6 +380,7 @@ class _EffectLoopResults(NamedTuple):
     Wk: Array
     k: int
     params: ModelParams_Design
+
 
 class _BetaLoopResults(NamedTuple):
     G: ArrayLike | SparseMatrix
@@ -440,23 +429,23 @@ def _effect_loop(ldx: int, effect_params: _EffectLoopResults) -> _EffectLoopResu
 
     return effect_params._replace(Wk=Wk, params=params)
 
+
 def _beta_loop(kdx, beta_params: _BetaLoopResults) -> _BetaLoopResults:
     G, GtG_diag, params = beta_params
-    # compute E[Z'k]G: remove the g-th effect 
+    # compute E[Z'k]G: remove the g-th effect
     # however notice that only intercept in non-zero in GtG off-diag
-    #ZkG = params.mu_z[:,kdx].T @ G - GtG_diag * params.B[-1,kdx]
+    # ZkG = params.mu_z[:,kdx].T @ G - GtG_diag * params.B[-1,kdx]
     # without intercept
-    ZkG = params.mu_z[:,kdx].T @ G
-    
+    ZkG = params.mu_z[:, kdx].T @ G
+
     params = _update_beta(ZkG, G, GtG_diag, params, kdx)
     params = _update_p_hat(params, kdx)
 
-    return beta_params._replace(params = params)
+    return beta_params._replace(params=params)
+
 
 # loop function for annotation model
-def _factor_loop_annotation(
-    kdx: int, loop_params: _FactorLoopResults
-) -> _FactorLoopResults:
+def _factor_loop_annotation(kdx: int, loop_params: _FactorLoopResults) -> _FactorLoopResults:
     X, W, E_ZZ, params = loop_params
 
     l_dim, z_dim, p_dim = params.mu_w.shape
@@ -481,9 +470,7 @@ def _factor_loop_annotation(
     return loop_params._replace(W=W.at[kdx].set(Wk), params=params)
 
 
-def _effect_loop_annotation(
-    ldx: int, effect_params: _EffectLoopResults
-) -> _EffectLoopResults:
+def _effect_loop_annotation(ldx: int, effect_params: _EffectLoopResults) -> _EffectLoopResults:
     E_zzk, RtZk, Wk, kdx, params = effect_params
 
     # remove current kl'th effect and update its expected residual
@@ -500,11 +487,10 @@ def _effect_loop_annotation(
     return effect_params._replace(Wk=Wk, params=params)
 
 
-
 @eqx.filter_jit
 def _inner_loop(
-    X: ArrayLike | SparseMatrix, 
-    G: ArrayLike | SparseMatrix, 
+    X: ArrayLike | SparseMatrix,
+    G: ArrayLike | SparseMatrix,
     GtG_diag: ArrayLike,
     params: ModelParams_Design,
 ):
@@ -531,7 +517,7 @@ def _inner_loop(
     _, _, params = lax.fori_loop(0, z_dim, _beta_loop, init_beta_params)
     # update precision paramter for beta
     params = _update_tau_beta_mle(params)
-    
+
     # update precision parameters via MLE
     params = _update_tau(X, params)
 
@@ -581,7 +567,7 @@ def _annotation_inner_loop(
     params = _update_tau(X, params)
 
     # compute elbo
-    elbo_res = compute_elbo(X, G, GtG_diag,params)
+    elbo_res = compute_elbo(X, G, GtG_diag, params)
 
     return elbo_res, params
 
@@ -684,9 +670,7 @@ def _init_params(
         # random initialization
         init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
     else:
-        raise ValueError(
-            f"Unknown initialization provided '{init}'; Choices: {type_options}"
-        )
+        raise ValueError(f"Unknown initialization provided '{init}'; Choices: {type_options}")
 
     init_var_z = jnp.diag(random.normal(var_key, shape=(z_dim,)) ** 2)
 
@@ -694,9 +678,7 @@ def _init_params(
     init_mu_w = random.normal(muw_key, shape=(l_dim, z_dim, p_dim)) * 1e-3
     init_var_w = (1 / tau_0) * (random.normal(varw_key, shape=(l_dim, z_dim))) ** 2
 
-    init_alpha = random.dirichlet(
-        alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim)
-    )
+    init_alpha = random.dirichlet(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
     if A is not None:
         p_dim, m = A.shape
         theta = random.normal(theta_key, shape=(m, z_dim))
@@ -710,12 +692,12 @@ def _init_params(
     # Notice: shape maybe (z_dim,): same for all feature in each component
     tau_beta = jnp.ones((z_dim,))
     init_mu_beta = random.normal(beta_key, shape=(g_dim, z_dim)) * 1e-3
-    init_var_beta = (1 / tau_beta) * random.normal(var_beta_key, shape=(g_dim, z_dim))** 2
+    init_var_beta = (1 / tau_beta) * random.normal(var_beta_key, shape=(g_dim, z_dim)) ** 2
     # uniform prior for eta
-    p =  1.0 * jnp.ones(g_dim) 
+    p = 1.0 * jnp.ones(g_dim)
     # Initialization of variational params for eta
     # p_hat is in shape of (z_dim,g_dim)
-    p_hat = 0.5 * jnp.ones(shape = (z_dim,g_dim)) 
+    p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
 
     return ModelParams_Design(
         init_mu_z,
@@ -730,14 +712,12 @@ def _init_params(
         mu_beta=init_mu_beta,
         var_beta=init_var_beta,
         tau_beta=tau_beta,
-        p = p,
-        p_hat = p_hat
+        p=p,
+        p_hat=p_hat,
     )
 
 
-def _check_args(
-    X: ArrayLike, A: Optional[ArrayLike], z_dim: int, l_dim: int, init: _init_type
-):
+def _check_args(X: ArrayLike, A: Optional[ArrayLike], z_dim: int, l_dim: int, init: _init_type):
     # pull type options for init
     type_options = get_args(_init_type)
 
@@ -749,47 +729,33 @@ def _check_args(
 
     # dim checks
     if l_dim > p_dim:
-        raise ValueError(
-            f"l_dim should be less than p: received l_dim = {l_dim}, p = {p_dim}"
-        )
+        raise ValueError(f"l_dim should be less than p: received l_dim = {l_dim}, p = {p_dim}")
     if l_dim <= 0:
         raise ValueError(f"l_dim should be positive: received l_dim = {l_dim}")
     if z_dim > p_dim:
-        raise ValueError(
-            f"z_dim should be less than p: received z_dim = {z_dim}, p = {p_dim}"
-        )
+        raise ValueError(f"z_dim should be less than p: received z_dim = {z_dim}, p = {p_dim}")
     if z_dim > n_dim:
-        raise ValueError(
-            f"z_dim should be less than n: received z_dim = {z_dim}, n = {n_dim}"
-        )
+        raise ValueError(f"z_dim should be less than n: received z_dim = {z_dim}, n = {n_dim}")
     if z_dim <= 0:
         raise ValueError(f"z_dim should be positive: received z_dim = {z_dim}")
     # quality checks
     if not _is_valid(X):
-        raise ValueError(
-            "X contains 'nan/inf'. Please check input data for correctness or missingness"
-        )
+        raise ValueError("X contains 'nan/inf'. Please check input data for correctness or missingness")
 
     if A is not None:
         if len(A.shape) != 2:
-            raise ValueError(
-                f"Dimension of annotation matrix A should be 2: received {len(A.shape)}"
-            )
+            raise ValueError(f"Dimension of annotation matrix A should be 2: received {len(A.shape)}")
         a_p_dim, _ = A.shape
         if a_p_dim != p_dim:
             raise ValueError(
                 f"Leading dimension of annotation matrix A should match feature dimension {p_dim}: received {a_p_dim}"
             )
         if not _is_valid(A):
-            raise ValueError(
-                "A contains 'nan/inf'. Please check input data for correctness or missingness"
-            )
+            raise ValueError("A contains 'nan/inf'. Please check input data for correctness or missingness")
     # type check for init
 
     if init not in type_options:
-        raise ValueError(
-            f"Unknown initialization provided '{init}'; Choices: {type_options}"
-        )
+        raise ValueError(f"Unknown initialization provided '{init}'; Choices: {type_options}")
 
     return
 
@@ -856,11 +822,11 @@ def susie_pca(
         X = SparseMatrix(X, scale=standardize)
     if isinstance(G, ArrayLike):
         G_sp = jnp.asarray(G)
-        #extract diagonal of G.T @ G
-        GtG_diag = jnp.sum(G ** 2, axis = 0)
+        # extract diagonal of G.T @ G
+        GtG_diag = jnp.sum(G**2, axis=0)
     elif isinstance(G, sparse.JAXSparse):
         G_sp = SparseMatrix(G)
-        #extract diagonal of G.T @ G when G is a Binary matrix
+        # extract diagonal of G.T @ G when G is a Binary matrix
         GtG_diag = sparse.bcoo_reduce_sum(G, axes=(0,)).todense()
 
     # initialize PRNGkey and params
@@ -896,47 +862,3 @@ def susie_pca(
     pip = compute_pip(params)
 
     return SuSiEPCAResults_Design(params, elbo_res, pve, pip)
-
-
-#test
-import susiepca as sp
-from jax import config, numpy as jnp
-config.update("jax_enable_x64", True)
-config.update("jax_default_matmul_precision", "highest")
-Z, W, X, G, G_reduce, beta = sp.sim.generate_sim_design(
-    seed=0, l_dim=80, n_dim=6000, p_dim=1000, z_dim=4, g_dim=200, 
-    dense = False, susie_l_dim = 20, 
-)
-G = sparse.BCOO.fromdense(G)
-
-# results = susie_pca(X, 4, 80, G,max_iter=300)
-# params = results.params
-
-# results_lr = sp.infer_design_matrix.susie_pca(X, 4, 80, G, max_iter = 300)
-# params_lr = results_lr.params
-
-# import seaborn as sns
-# import matplotlib.pyplot as plt
-# sns.scatterplot(x = params.mu_beta[:,0],y = beta[:,2])
-# sns.scatterplot(x = params.B[:,0],y = beta[:,2])
-# sns.scatterplot(x = params_lr.mu_beta[:,0], y = beta[:,2])
-
-# params = results.params
-# E_BB = jnp.sum((params.mu_beta ** 2 + params.var_beta) * params.p_hat.T, axis=1)
-# jnp.trace(G.T @ G @ jnp.diag(E_BB))
-# GtG_diag = sparse.bcoo_reduce_sum(G, axes=(0,)).todense()
-# jnp.sum(GtG_diag * E_BB)
-# jnp.sum(params.p_hat[0,:]>0.4)
-# plt.hist(params.p_hat[0,params.p_hat[0,:]<0.05])
-# plt.hist(params.mu_beta[0,params.p_hat[0,:]>0.05])
-
-# initialize PRNGkey and params
-# GtG_diag = sparse.bcoo_reduce_sum(G, axes=(0,)).todense()
-# rng_key = random.PRNGKey(0)
-# G_sp = SparseMatrix(G)
-# params = _init_params(rng_key, X, G_sp, 4, 20)
-
-
-# params_1 = _update_p_hat(params, 0)
-# params.p_hat[0,:]
-# params_1.p_hat[0,:]

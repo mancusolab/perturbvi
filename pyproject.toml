@@ -23,7 +23,17 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = []
+dependencies = [
+    "importlib-metadata; python_version<\"3.8\"",
+    "jaxlib",
+    "jax",
+    "jaxtyping",
+    "equinox",
+    "lineax",
+    "optimistix",
+    "optax",
+    "plum"
+]
 
 [project.urls]
 Documentation = "https://github.com/unknown/susieguy#readme"
@@ -94,7 +104,7 @@ extra-standard-library = ["typing_extensions"]
 order-by-type = false
 
 [tool.ruff.isort.sections]
-jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "optimistix"]
+jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "optimistix", "optax"]
 
 [tool.ruff.per-file-ignores]
 # Tests can use magic values, assertions, and relative imports
