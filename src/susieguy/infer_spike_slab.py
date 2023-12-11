@@ -1,7 +1,7 @@
 from functools import partial
 from typing import get_args, Literal, NamedTuple, Optional, Tuple
 
-from common import (
+from .common import (
     compute_pip,
     compute_pve,
     ELBOResults_Design,
@@ -9,7 +9,7 @@ from common import (
     SuSiEPCAResults_Design,
 )
 from plum import dispatch
-from sparse import SparseMatrix
+from .sparse import SparseMatrix
 
 # from memory_profiler import profile
 import equinox as eqx
@@ -621,6 +621,7 @@ def _init_params(
     z_dim: int,
     l_dim: int,
     A: Optional[ArrayLike] = None,
+    p_prior: float = 0.5,
     tau: float = 1.0,
     init: _init_type = "pca",
 ) -> ModelParams_Design:
@@ -630,7 +631,8 @@ def _init_params(
         rng_key: Random number generator seed
         X: Input data. Should be an array-like
         z_dim: Latent factor dimension (K)
-        l_dim: Number of single-effects comprising each factor ( L)
+        l_dim: Number of single-effects comprising each factor (L)
+        p_prior: Prior probability for each perturbation being non-zero.
         init: How to initialize the variational mean parameters for latent factors.
             Either "pca" or "random" (default = "pca")
         tau: initial value of residual precision
@@ -694,7 +696,7 @@ def _init_params(
     init_mu_beta = random.normal(beta_key, shape=(g_dim, z_dim)) * 1e-3
     init_var_beta = (1 / tau_beta) * random.normal(var_beta_key, shape=(g_dim, z_dim)) ** 2
     # uniform prior for eta
-    p = 1.0 * jnp.ones(g_dim)
+    p = p_prior * jnp.ones(g_dim)
     # Initialization of variational params for eta
     # p_hat is in shape of (z_dim,g_dim)
     p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
@@ -766,6 +768,7 @@ def susie_pca(
     l_dim: int,
     G: ArrayLike | sparse.JAXSparse,
     A: Optional[ArrayLike] = None,
+    p_prior: float = 0.5,
     tau: float = 1.0,
     standardize: bool = False,
     init: _init_type = "pca",
@@ -783,6 +786,7 @@ def susie_pca(
         G: Secondary information. Should be an array-like or sparse JAX matrix.
         A: Annotation matrix to use in parameterized-prior mode. If not `None`, leading dimension
             should match the feature dimension of X.
+        p_prior: Prior probability for each perturbation being non-zero.
         tau: initial value of residual precision (default = 1)
         standardize: Whether to center and scale the input data with mean 0
             and variance 1 (default = False)
@@ -831,7 +835,7 @@ def susie_pca(
 
     # initialize PRNGkey and params
     rng_key = random.PRNGKey(seed)
-    params = _init_params(rng_key, X, G_sp, z_dim, l_dim, A, tau, init)
+    params = _init_params(rng_key, X, G_sp, z_dim, l_dim, A, p_prior,tau, init)
 
     #  core loop for inference
     elbo = -5e25
