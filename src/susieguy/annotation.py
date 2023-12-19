@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from dataclasses import field
+from typing import Any
 
 import equinox as eqx
 import jax
@@ -50,7 +51,7 @@ class FixedPrior(PriorModel):
 class AnnotationPriorModel(PriorModel):
     A: DataMatrix
     search: optx.AbstractMinimiser
-    step = field(init=False)
+    step: Any = field(init=False)
 
     def __post_init__(self):
         self.step = eqx.filter_jit(eqx.Partial(self.search.step, _loss, options=None, tags=None))

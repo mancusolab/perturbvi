@@ -15,9 +15,8 @@ from .common import (
     DataMatrix,
     ModelParams,
 )
-from .factor import FactorModel
+from .factorloadings import FactorModel, LoadingModel
 from .guide import GuideModel
-from .loading import LoadingModel
 from .sparse import CenteredSparseMatrix, SparseMatrix
 from .utils import prob_pca
 
