@@ -65,21 +65,32 @@ plugins:
         exclude:
             - "_overrides"
     - mkdocstrings:
+        default_handler: python
+        enable_inventory: true
+        custom_templates: docs/_templates
         handlers:
             python:
                 paths: [src]
+                import:
+                - https://docs.kidger.site/equinox/objects.inv
+                - https://docs.kidger.site/jaxtyping/objects.inv
                 setup_commands:
                     - import jaxtyping
                     - jaxtyping.set_array_name_format("array")
-                    - import jax
-                    - jax.ShapeDtypeStruct.__module__ = "jax"
                     - import typing
                     - typing.Any.__module__ = "builtins"
                 load_external_modules: true
                 options:
+                    preload_modules:
+                    - equinox
+                    - jaxtyping
+                    extensions:
+                    - pydantic: {schema: true}
+                    - docs/_scripts/extension.py:DynamicDocstrings:
+                        paths: [susieguy.families]
                     # general options
                     allow_inspection: true
-                    show_bases: True
+                    show_bases: true
                     show_source: false
                     # heading options
                     heading_level: 4
@@ -92,6 +103,20 @@ plugins:
                         - "!^_"
                         - "^__init__$"
                     # docstring options
-                    show_if_no_docstring: false
+                    show_if_no_docstring: true
                     # signature/type annotation options
+                    separate_signature: false
+                    annotations_path: brief
                     show_signature_annotations: true
+
+nav:
+    - 'index.md'
+    - API:
+      - 'api/families.md'
+      - 'api/infer.md'
+    - Misc:
+        - 'authors.md'
+        - 'versions.md'
+        - 'license.md'
+        - 'conduct.md'
+        - 'cite.md'

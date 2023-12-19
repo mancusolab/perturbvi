@@ -1,9 +1,13 @@
 from importlib.metadata import PackageNotFoundError, version  # pragma: no cover
 
-from susieguy import infer_design_matrix, infer_spike_slab, common, sparse
+# annoying lint bug...
+from .infer import (
+    compute_elbo as compute_elbo,
+    compute_pip as compute_pip,
+    compute_pve as compute_pve,
+    infer as infer,
+)
 
-
-__all__ = ["common", "infer_design_matrix", "infer_spike_slab", "sparse"]
 
 try:
     # Change here if project is renamed and does not equal the package name

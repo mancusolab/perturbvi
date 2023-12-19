@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Optional
 
 from plum import dispatch
 
-import equinox as eqx
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
@@ -13,7 +12,7 @@ import lineax as lx
 
 from jax._src.dtypes import JAXType  # ug...
 from jax.experimental import sparse
-from jaxtyping import Array, ArrayLike, Float, Num, Shaped
+from jaxtyping import Array, ArrayLike, Float, Num
 
 
 _sparse_mean = sparse.sparsify(jnp.mean)
@@ -43,85 +42,54 @@ def _get_dense_var(geno: sparse.JAXSparse, dense_dtype: JAXType):
     #     return _, var_idx
     #
     # _, var_geno = lax.scan(_inner, 0.0, geno.T)
-    var_geno = (
-        _sparse_mean(geno**2, axis=0, dtype=dense_dtype)
-        - _sparse_mean(geno, axis=0, dtype=dense_dtype) ** 2
-    )
+    var_geno = _sparse_mean(geno**2, axis=0, dtype=dense_dtype) - _sparse_mean(geno, axis=0, dtype=dense_dtype) ** 2
 
     return var_geno.todense()
 
 
-class _MatrixLinearOperator(lx.AbstractLinearOperator):
-    """Wraps a 2-dimensional JAX array into a linear operator.
-
-    If the matrix has shape `(a, b)` then matrix-vector multiplication (`self.mv`) is
-    defined in the usual way: as performing a matrix-vector that accepts a vector of
-    shape `(a,)` and returns a vector of shape `(b,)`.
-    """
-
-    matrix: Float[Array, "a b"]
-    tags: frozenset[object] = eqx.field(static=True)
-
-    def __init__(
-        self, matrix: Shaped[Array, "a b"], tags: Union[object, frozenset[object]] = ()
-    ):
-        """**Arguments:**
-
-        - `matrix`: a two-dimensional JAX array. For an array with shape `(a, b)` then
-            this operator can perform matrix-vector products on a vector of shape
-            `(b,)` to return a vector of shape `(a,)`.
-        - `tags`: any tags indicating whether this matrix has any particular properties,
-            like symmetry or positive-definite-ness. Note that these properties are
-            unchecked and you may get incorrect values elsewhere if these tags are
-            wrong.
-        """
-        if jnp.ndim(matrix) != 2:
-            raise ValueError(
-                "`MatrixLinearOperator(matrix=...)` should be 2-dimensional."
-            )
-        if not jnp.issubdtype(matrix, jnp.inexact):
-            matrix = matrix.astype(jnp.float32)
-        self.matrix = matrix
-        self.tags = lx._operator._frozenset(tags)
-
-    def mv(self, vector):
-        return jnp.matmul(self.matrix, vector, precision=lax.Precision.HIGHEST)
-
-    def as_matrix(self):
-        return self.matrix
-
-    def transpose(self):
-        if lx._tags.symmetric_tag in self.tags:
-            return self
-        return _MatrixLinearOperator(self.matrix.T, lx._tags.transpose_tags(self.tags))
-
-    def in_structure(self):
-        _, in_size = jnp.shape(self.matrix)
-        return jax.ShapeDtypeStruct(shape=(in_size,), dtype=self.matrix.dtype)
-
-    def out_structure(self):
-        out_size, _ = jnp.shape(self.matrix)
-        return jax.ShapeDtypeStruct(shape=(out_size,), dtype=self.matrix.dtype)
-
-
-class _SparseMatrixOperator(lx.AbstractLinearOperator):
+class SparseMatrix(lx.AbstractLinearOperator):
     matrix: sparse.JAXSparse
 
-    def __init__(self, matrix):
+    def __init__(self, matrix: sparse.JAXSparse):
         self.matrix = matrix
 
     def mv(self, vector: ArrayLike):
-        return sparse.sparsify(jnp.matmul)(
-            self.matrix, vector, precision=lax.Precision.HIGHEST
-        )
+        return sparse.sparsify(jnp.matmul)(self.matrix, vector, precision=lax.Precision.HIGHEST)
+
+    def mm(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "n k"]:
+        return jax.vmap(self.data.mv, (1,), 1)(matrix)
+
+    @dispatch
+    def __matmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
+        return self.matrix @ other
+
+    @dispatch
+    def __matmul__(self, vector: Num[ArrayLike, " p"]) -> Float[Array, " n"]:
+        return self.mv(vector)
+
+    @dispatch
+    def __matmul__(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "p k"]:
+        return self.mm(matrix)
+
+    @dispatch
+    def __rmatmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
+        return other @ self.matrix
+
+    @dispatch
+    def __rmatmul__(self, vector: Num[ArrayLike, " n"]) -> Float[Array, " p"]:
+        return self.T.mv(vector.T).T
+
+    @dispatch
+    def __rmatmul__(self, matrix: Num[ArrayLike, "k n"]) -> Float[Array, "k p"]:
+        return self.T.mm(matrix.T).T
 
     def as_matrix(self) -> Float[Array, "n p"]:
         # raise ValueError("Refusing to materialise sparse matrix.")
         # Or you could do:
         return self.matrix.todense()
 
-    def transpose(self) -> "_SparseMatrixOperator":
-        return _SparseMatrixOperator(self.matrix.T)
+    def transpose(self) -> "SparseMatrix":
+        return SparseMatrix(self.matrix.T)
 
     def in_structure(self) -> jax.ShapeDtypeStruct:
         _, in_size = self.matrix.shape
@@ -132,7 +100,7 @@ class _SparseMatrixOperator(lx.AbstractLinearOperator):
         return jax.ShapeDtypeStruct((out_size,), self.matrix.dtype)
 
 
-class SparseMatrix(lx.AbstractLinearOperator):
+class CenteredSparseMatrix(lx.AbstractLinearOperator):
     data: lx.AbstractLinearOperator
 
     @dispatch
@@ -142,25 +110,25 @@ class SparseMatrix(lx.AbstractLinearOperator):
     @dispatch
     def __init__(
         self,
-        data: sparse.JAXSparse,
+        matrix: sparse.JAXSparse,
         covar: Optional[ArrayLike] = None,
         scale: bool = False,
     ):
-        n, p = data.shape
-        geno_op = _SparseMatrixOperator(data)
-        dtype = data.dtype
+        n, p = matrix.shape
+        geno_op = SparseMatrix(matrix)
+        dtype = matrix.dtype
 
         if covar is None:
             covar = jnp.ones((n, 1), dtype=dtype)
-            beta = _sparse_mean(data, axis=0, dtype=dtype).todense()
+            beta = _sparse_mean(matrix, axis=0, dtype=dtype).todense()
             beta = beta.reshape((1, p))
         else:
-            beta = _get_mean_terms(data, covar)
+            beta = _get_mean_terms(matrix, covar)
 
-        center_op = _MatrixLinearOperator(covar) @ _MatrixLinearOperator(beta)
+        center_op = lx.MatrixLinearOperator(covar) @ lx.MatrixLinearOperator(beta)
 
         if scale:
-            wgt = jnp.sqrt(_get_dense_var(data, dtype))
+            wgt = jnp.sqrt(_get_dense_var(matrix, dtype))
             scale_op = lx.DiagonalLinearOperator(1.0 / wgt)
             self.data = (geno_op - center_op) @ scale_op
         else:
@@ -183,9 +151,7 @@ class SparseMatrix(lx.AbstractLinearOperator):
         return self.mm(matrix)
 
     @dispatch
-    def __rmatmul__(
-        self, other: lx.AbstractLinearOperator
-    ) -> lx.AbstractLinearOperator:
+    def __rmatmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
         return other @ self.data
 
     @dispatch
@@ -205,8 +171,8 @@ class SparseMatrix(lx.AbstractLinearOperator):
     def as_matrix(self) -> Float[Array, "n p"]:
         return self.data.as_matrix()
 
-    def transpose(self) -> "SparseMatrix":
-        return SparseMatrix(self.data.T)
+    def transpose(self) -> "CenteredSparseMatrix":
+        return CenteredSparseMatrix(self.data.T)
 
     @property
     def shape(self):
@@ -222,22 +188,19 @@ class SparseMatrix(lx.AbstractLinearOperator):
         return self.data.out_structure()
 
 
-@lx.is_symmetric.register(_MatrixLinearOperator)
-@lx.is_symmetric.register(_SparseMatrixOperator)
 @lx.is_symmetric.register(SparseMatrix)
+@lx.is_symmetric.register(CenteredSparseMatrix)
 def _(op):
     return False
 
 
-@lx.is_negative_semidefinite.register(_MatrixLinearOperator)
-@lx.is_negative_semidefinite.register(_SparseMatrixOperator)
 @lx.is_negative_semidefinite.register(SparseMatrix)
+@lx.is_negative_semidefinite.register(CenteredSparseMatrix)
 def _(op):
     return False
 
 
-@lx.linearise.register(_MatrixLinearOperator)
-@lx.linearise.register(_SparseMatrixOperator)
 @lx.linearise.register(SparseMatrix)
+@lx.linearise.register(CenteredSparseMatrix)
 def _(op):
     return op

@@ -1,12 +1,12 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "susieguy"
 dynamic = ["version"]
 description = ''
-readme = "README.md"
+readme = "README.rst"
 requires-python = ">=3.9"
 license = "MIT"
 keywords = []
@@ -32,7 +32,7 @@ dependencies = [
     "lineax",
     "optimistix",
     "optax",
-    "plum"
+    "plum-dispatch"
 ]
 
 [project.urls]
@@ -72,11 +72,6 @@ dependencies = [
     "ruff>=0.0.243",
 ]
 
-[tool.black]
-target-version = ["py37"]
-line-length = 120
-skip-string-normalization = true
-
 [tool.ruff]
 target-version = "py37"
 line-length = 120
@@ -90,6 +85,10 @@ ignore = [
     "S105", "S106", "S107",
     # Ignore complexity
     "C901", "PLR0911", "PLR0912", "PLR0913", "PLR0915",
+    # Ignore syntax checks on jaxarray shaped typing
+    "F722",
+    # Ignore multidispatch false positives
+    "F811",
 ]
 ignore-init-module-imports = true
 
@@ -109,6 +108,12 @@ jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "optimistix", "optax"]
 [tool.ruff.per-file-ignores]
 # Tests can use magic values, assertions, and relative imports
 "tests/**/*" = ["PLR2004", "S101", "TID252"]
+
+[tool.pyright]
+reportIncompatibleMethodOverride = true
+reportIncompatibleVariableOverride = false  # Incompatible with eqx.AbstractVar
+include = ["susieguy", "tests"]
+exclude = ["docs"]
 
 [tool.coverage.run]
 source_pkgs = ["susieguy", "tests"]
