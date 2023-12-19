@@ -161,9 +161,6 @@ def _inner_loop(
     # update annotation priors if any
     params = annotation.update(params)
 
-    # update prior probabilities if annotations are provided
-    params = annotation.update(params)
-
     # update loadings prior precision via ~Empirical Bayes and update variational params
     params = loadings.update_hyperparam(params)
     params = loadings.update(X, factors, params)
