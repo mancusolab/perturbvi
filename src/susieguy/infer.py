@@ -13,7 +13,6 @@ from jaxtyping import Array, ArrayLike
 from .annotation import AnnotationPriorModel, FixedPrior, PriorModel
 from .common import (
     DataMatrix,
-    FloatOrArray,
     ModelParams,
 )
 from .factor import FactorModel
@@ -50,8 +49,8 @@ def _is_valid(G: sparse.JAXSparse):
 
 
 def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, params: ModelParams) -> ModelParams:
-    n_dim, z_dim = params.mu_z.shape
-    l_dim, z_dim, p_dim = params.mu_w.shape
+    n_dim, z_dim = params.mean_z.shape
+    l_dim, z_dim, p_dim = params.mean_w.shape
 
     # calculate moments of factors and loadings
     mean_z, mean_zz = factor.moments(params)
@@ -80,11 +79,11 @@ class ELBOResults(NamedTuple):
 
     """
 
-    elbo: FloatOrArray
-    expected_loglike: FloatOrArray
-    kl_factors: FloatOrArray
-    kl_loadings: FloatOrArray
-    kl_guide: FloatOrArray
+    elbo: Array
+    expected_loglike: Array
+    kl_factors: Array
+    kl_loadings: Array
+    kl_guide: Array
 
     def __str__(self):
         return (
@@ -115,8 +114,8 @@ def compute_elbo(
         ELBOResult_Design: the object contains all components in ELBO
 
     """
-    n_dim, z_dim = params.mu_z.shape
-    l_dim, z_dim, p_dim = params.mu_w.shape
+    n_dim, z_dim = params.mean_z.shape
+    l_dim, z_dim, p_dim = params.mean_w.shape
 
     # calculate second moment of Z along k, (k x k) matrix
     # E[Z'Z] = V_k[Z] * tr(I_n) + E[Z]'E[Z] = V_k[Z] * n + E[Z]'E[Z]
@@ -177,33 +176,31 @@ def _inner_loop(
     params = guide.update(params)
 
     # update precision parameters via MLE
-    params = _update_tau(X, params)
+    params = _update_tau(X, factors, loadings, params)
 
     # compute elbo
-    elbo_res = compute_elbo(X, factors, loadings, guide, annotation, params)
+    elbo_res = compute_elbo(X, guide, factors, loadings, annotation, params)
 
     return elbo_res, params
 
 
-def _reorder_factors_by_pve(
-    pve: Array, annotations: AnnotationPriorModel, params: ModelParams
-) -> Tuple[Array, ModelParams]:
+def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelParams) -> Tuple[Array, ModelParams]:
     sorted_indices = jnp.argsort(pve)[::-1]
     pve = pve[sorted_indices]
 
-    sorted_mu_z = params.mu_z[:, sorted_indices]
+    sorted_mu_z = params.mean_z[:, sorted_indices]
     sorted_var_z = params.var_z[sorted_indices, sorted_indices]
-    sorted_mu_beta = params.mu_beta[:, sorted_indices]
+    sorted_mu_beta = params.mean_beta[:, sorted_indices]
     sorted_var_beta = params.var_beta[:, sorted_indices]
     sorted_p_hat = params.p_hat[sorted_indices, :]
-    sorted_mu_w = params.mu_w[:, sorted_indices, :]
+    sorted_mu_w = params.mean_w[:, sorted_indices, :]
     sorted_var_w = params.var_w[:, sorted_indices]
     sorted_tau_beta = params.tau_beta[sorted_indices]
     sorted_alpha = params.alpha[:, sorted_indices, :]
     sorted_tau_0 = params.tau_0[:, sorted_indices]
     if isinstance(annotations, AnnotationPriorModel):
         sorted_theta = params.theta[:, sorted_indices]
-        sorted_pi = annotations.predict(ModelParams(theta=sorted_theta))
+        sorted_pi = annotations.predict(ModelParams(theta=sorted_theta))  # type: ignore
     else:
         sorted_theta = None
         sorted_pi = params.pi
@@ -218,6 +215,7 @@ def _reorder_factors_by_pve(
         sorted_tau_0,
         sorted_theta,
         sorted_pi,
+        None,
         sorted_mu_beta,
         sorted_var_beta,
         sorted_tau_beta,
@@ -298,7 +296,7 @@ def _init_params(
     if isinstance(annotations, AnnotationPriorModel):
         p_dim, m = annotations.shape
         theta = random.normal(theta_key, shape=(m, z_dim))
-        pi = annotations.predict(ModelParams(theta=theta))
+        pi = annotations.predict(ModelParams(theta=theta))  # type: ignore
     else:
         theta = None
         pi = jnp.ones(p_dim) / p_dim
@@ -327,19 +325,24 @@ def _init_params(
         tau_0,
         theta=theta,
         pi=pi,
-        mu_beta=init_mu_beta,
+        mean_beta=init_mu_beta,
         var_beta=init_var_beta,
         tau_beta=tau_beta,
-        p=p,
+        p=jnp.asarray(p),
         p_hat=p_hat,
     )
 
 
-def _check_args(X: ArrayLike, A: Optional[ArrayLike], z_dim: int, l_dim: int, init: _init_type):
+def _check_args(
+    X: ArrayLike | sparse.JAXSparse, A: Optional[ArrayLike | sparse.JAXSparse], z_dim: int, l_dim: int, init: _init_type
+) -> Tuple[Array | sparse.JAXSparse, Array | sparse.JAXSparse]:
     # pull type options for init
     type_options = get_args(_init_type)
 
-    if len(X.shape) != 2:
+    if isinstance(X, ArrayLike):
+        X = jnp.asarray(X)
+
+    if X.ndim != 2:
         raise ValueError(f"Shape of X = {X.shape}; Expected 2-dim matrix")
 
     # should we check for n < p?
@@ -361,7 +364,9 @@ def _check_args(X: ArrayLike, A: Optional[ArrayLike], z_dim: int, l_dim: int, in
         raise ValueError("X contains 'nan/inf'. Please check input data for correctness or missingness")
 
     if A is not None:
-        if len(A.shape) != 2:
+        if isinstance(A, ArrayLike):
+            A = jnp.asarray(A)
+        if A.ndim != 2:
             raise ValueError(f"Dimension of annotation matrix A should be 2: received {len(A.shape)}")
         a_p_dim, _ = A.shape
         if a_p_dim != p_dim:
@@ -375,7 +380,7 @@ def _check_args(X: ArrayLike, A: Optional[ArrayLike], z_dim: int, l_dim: int, in
     if init not in type_options:
         raise ValueError(f"Unknown initialization provided '{init}'; Choices: {type_options}")
 
-    return
+    return X, A  # type: ignore
 
 
 class InferResults(NamedTuple):
@@ -453,17 +458,16 @@ def infer(
     """
 
     # sanity check arguments
-    _check_args(X, A, z_dim, l_dim, init)
+    X, A = _check_args(X, A, z_dim, l_dim, init)
 
     # cast to jax array
-    if isinstance(X, ArrayLike):
-        X = jnp.asarray(X)
+    if isinstance(X, Array):
         # option to center the data
         X -= jnp.mean(X, axis=0)
         if standardize:
             X /= jnp.std(X, axis=0)
     elif isinstance(X, sparse.JAXSparse):
-        X = CenteredSparseMatrix(X, scale=standardize)
+        X = CenteredSparseMatrix(X, scale=standardize)  # type: ignore
     if isinstance(G, ArrayLike):
         guide = GuideModel(jnp.asarray(G))
     elif isinstance(G, sparse.JAXSparse):
@@ -471,11 +475,11 @@ def infer(
 
     if A is not None:
         adam = optax.adam(learning_rate)
-        annotation = AnnotationPriorModel(A, optx.OptaxMinimiser(adam))
+        annotation = AnnotationPriorModel(A, optx.OptaxMinimiser(adam, rtol=1e-3, atol=1e-3))
     else:
         annotation = FixedPrior()
 
-    n, p = X.shape
+    n, p = X.shape  # type: ignore
 
     factors = FactorModel(n, z_dim)
     loadings = LoadingModel(p, z_dim, l_dim)
@@ -486,6 +490,7 @@ def infer(
 
     #  core loop for inference
     elbo = -5e25
+    elbo_res = None
     for idx in range(1, max_iter + 1):
         elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params)
 
@@ -539,14 +544,14 @@ def compute_pve(params: ModelParams) -> Array:
         explained by each factor (PVE)
     """
 
-    n_dim, z_dim = params.mu_z.shape
+    n_dim, z_dim = params.mean_z.shape
     W = params.W
 
     z_dim, p_dim = W.shape
 
     sk = jnp.zeros(z_dim)
     for k in range(z_dim):
-        sk = sk.at[k].set(jnp.sum((params.mu_z[:, k, jnp.newaxis] * W[k, :]) ** 2))
+        sk = sk.at[k].set(jnp.sum((params.mean_z[:, k, jnp.newaxis] * W[k, :]) ** 2))
 
     s = jnp.sum(sk)
     pve = sk / (s + p_dim * n_dim * (1 / params.tau))

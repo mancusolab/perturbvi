@@ -20,7 +20,7 @@ _sparse_mean = sparse.sparsify(jnp.mean)
 
 @jax.jit
 @sparse.sparsify
-def _get_mean_terms(geno: ArrayLike, covar: ArrayLike) -> Array:
+def _get_mean_terms(geno: Array, covar: Array) -> Array:
     m, n = covar.shape
     dtype = covar.dtype
     rcond = jnp.finfo(dtype).eps * max(n, m)
@@ -54,10 +54,10 @@ class SparseMatrix(lx.AbstractLinearOperator):
         self.matrix = matrix
 
     def mv(self, vector: ArrayLike):
-        return sparse.sparsify(jnp.matmul)(self.matrix, vector, precision=lax.Precision.HIGHEST)
+        return sparse.sparsify(jnp.matmul)(self.matrix, vector, precision=lax.Precision.HIGHEST)  # type: ignore
 
     def mm(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "n k"]:
-        return jax.vmap(self.data.mv, (1,), 1)(matrix)
+        return jax.vmap(self.matrix.mv, (1,), 1)(matrix)
 
     @dispatch
     def __matmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
@@ -77,11 +77,11 @@ class SparseMatrix(lx.AbstractLinearOperator):
 
     @dispatch
     def __rmatmul__(self, vector: Num[ArrayLike, " n"]) -> Float[Array, " p"]:
-        return self.T.mv(vector.T).T
+        return self.T.mv(jnp.asarray(vector).T).T
 
     @dispatch
     def __rmatmul__(self, matrix: Num[ArrayLike, "k n"]) -> Float[Array, "k p"]:
-        return self.T.mm(matrix.T).T
+        return self.T.mm(jnp.asarray(matrix).T).T
 
     def as_matrix(self) -> Float[Array, "n p"]:
         # raise ValueError("Refusing to materialise sparse matrix.")
@@ -98,6 +98,13 @@ class SparseMatrix(lx.AbstractLinearOperator):
     def out_structure(self) -> jax.ShapeDtypeStruct:
         out_size, _ = self.matrix.shape
         return jax.ShapeDtypeStruct((out_size,), self.matrix.dtype)
+
+    @property
+    def shape(self):
+        n, *_ = self.out_structure().shape
+        p, *_ = self.in_structure().shape
+
+        return n, p
 
 
 class CenteredSparseMatrix(lx.AbstractLinearOperator):
@@ -138,6 +145,12 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
     def dense_dtype(self) -> JAXType:
         return self.out_structure().dtype
 
+    def mv(self, vector: Num[ArrayLike, " p"]) -> Float[Array, " n"]:
+        return self.data.mv(vector)
+
+    def mm(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "n k"]:
+        return jax.vmap(self.data.mv, (1,), 1)(jnp.asarray(matrix))
+
     @dispatch
     def __matmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
         return self.data @ other
@@ -156,17 +169,11 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
 
     @dispatch
     def __rmatmul__(self, vector: Num[ArrayLike, " n"]) -> Float[Array, " p"]:
-        return self.T.mv(vector.T).T
+        return self.T.mv(jnp.asarray(vector).T).T
 
     @dispatch
     def __rmatmul__(self, matrix: Num[ArrayLike, "k n"]) -> Float[Array, "k p"]:
-        return self.T.mm(matrix.T).T
-
-    def mv(self, vector: Num[ArrayLike, " p"]) -> Float[Array, " n"]:
-        return self.data.mv(vector)
-
-    def mm(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "n k"]:
-        return jax.vmap(self.data.mv, (1,), 1)(matrix)
+        return self.T.mm(jnp.asarray(matrix).T).T
 
     def as_matrix(self) -> Float[Array, "n p"]:
         return self.data.as_matrix()

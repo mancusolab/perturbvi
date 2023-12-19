@@ -1,4 +1,4 @@
-from typing import NamedTuple, Union
+from typing import Any, NamedTuple, Union
 
 import jax.numpy as jnp
 
@@ -17,9 +17,9 @@ class ModelParams(NamedTuple):
     to infer from the SuSiE PCA.
 
     Attributes:
-        mu_z: mean parameter for factor Z
+        mean_z: mean parameter for factor Z
         var_z: variance parameter for factor Z
-        mu_w: conditional mean parameter for loadings W
+        mean_w: conditional mean parameter for loadings W
         var_w: conditional variance parameter for loading W
         alpha: parameter for the gamma that follows multinomial
                 distribution
@@ -31,11 +31,11 @@ class ModelParams(NamedTuple):
     """
 
     # variational params for Z
-    mu_z: Array
+    mean_z: Array
     var_z: Array
 
     # variational params for W given Gamma
-    mu_w: Array
+    mean_w: Array
     var_w: Array
 
     # variational params for Gamma
@@ -48,19 +48,21 @@ class ModelParams(NamedTuple):
     # prior probability for gamma
     theta: Array
     pi: Array
+    # internal state for learning theta
+    ann_state: Any
 
     # variational params of perturbation effects
-    mu_beta: Array
+    mean_beta: Array
     var_beta: Array
 
     # residual precision for beta
     tau_beta: Array
 
     # prior for Eta
-    p: FloatOrArray
+    p: Array
     # variational params for Eta
     p_hat: Array
 
     @property
     def W(self) -> Array:
-        return jnp.sum(self.mu_w * self.alpha, axis=0)
+        return jnp.sum(self.mean_w * self.alpha, axis=0)
