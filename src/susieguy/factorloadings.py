@@ -34,11 +34,11 @@ class FactorModel(eqx.Module):
 
         update_var_z = jnp.linalg.inv(params.tau * mean_ww + jnp.identity(z_dim))
         update_mu_z = (params.tau * (data @ mean_w.T) + guide.predict(params)) @ update_var_z
-        z_params = FactorParams(
+
+        return params._replace(
             mean_z=update_mu_z,
-            covar_z=update_var_z,
+            var_z=update_var_z,
         )
-        return params._replace(z_params=z_params)
 
     def moments(self, params: ModelParams) -> FactorMoments:
         n_dim, z_dim = self.shape
@@ -109,11 +109,12 @@ def _update_susie_effect(ldx: int, effect_params: _EffectLoopResults) -> _Effect
     Z_s = (E_RtZk / E_zzk) * jnp.sqrt(E_zzk * params.tau)
     s2_s = 1 / (E_zzk * params.tau)
     s20_s = params.tau_0[ldx, kdx]
-
     log_bf = _log_bf_np(Z_s, s2_s, s20_s)
-    log_alpha = jnp.log(params.pi[kdx, :]) + log_bf
+    # notice that pi is 1-D array for model without annotation
+    # changed in the init_params
+    log_alpha = jnp.log(params.pi[kdx,:]) + log_bf
     alpha_kl = nn.softmax(log_alpha)
-
+    
     # update marginal w_kl
     Wk = Wkl + (update_mean_wkl * alpha_kl)
     params = params._replace(
@@ -133,15 +134,15 @@ class _FactorLoopResults(NamedTuple):
 
 
 def _loop_factors(kdx: int, loop_params: _FactorLoopResults) -> _FactorLoopResults:
-    data, mean_w, mean_zz, params = loop_params
-    l_dim, z_dim, p_dim = mean_w
+    data, W, mean_zz, params = loop_params
+    l_dim, z_dim, p_dim = params.mean_w.shape
 
     # sufficient stats for inferring downstream w_kl/alpha_kl
     not_kdx = jnp.where(jnp.arange(z_dim) != kdx, size=z_dim - 1)
     E_zpzk = mean_zz[kdx][not_kdx]
     E_zzk = mean_zz[kdx, kdx]
-    Wk = mean_w[kdx, :]
-    Wnk = mean_w[not_kdx]
+    Wk = W[kdx, :]
+    Wnk = W[not_kdx]
     RtZk = params.mean_z[:, kdx] @ data - Wnk.T @ E_zpzk
 
     # update over each of L effects
@@ -153,7 +154,7 @@ def _loop_factors(kdx: int, loop_params: _FactorLoopResults) -> _FactorLoopResul
         init_loop_param,
     )
 
-    return loop_params._replace(mean_w=mean_w.at[kdx].set(Wk), params=params)
+    return loop_params._replace(W=W.at[kdx].set(Wk), params=params)
 
 
 class LoadingModel(eqx.Module):
@@ -163,10 +164,10 @@ class LoadingModel(eqx.Module):
 
     @property
     def shape(self):
-        return self.l_dim, self.p_dim, self.z_dim
+        return self.l_dim, self.z_dim, self.p_dim
 
     def update(self, data: DataMatrix, factors: FactorModel, params: ModelParams) -> ModelParams:
-        l_dim, p_dim, z_dim = self.shape
+        l_dim, z_dim, p_dim = self.shape
         mean_z, mean_zz = factors.moments(params)
         mean_w, mean_ww = self.moments(params)
 

@@ -46,11 +46,11 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
 
         # E step
         W_op = lx.MatrixLinearOperator(W)
-        Z_new = multi_linear_solve(W_op, W.T @ X.T, solver).solution
+        Z_new = multi_linear_solve(W_op, X.T, solver).value.T
 
         # M step
-        Z_op = lx.MatrixLinearOperator(Z_new)
-        W = multi_linear_solve(Z_op, Z_new @ X).solution.T
+        Z_op = lx.MatrixLinearOperator(Z_new.T)
+        W = multi_linear_solve(Z_op, X, solver).value
 
         return i + 1, W, Z_new, Z
 
@@ -61,4 +61,4 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
 
     _, W, Z, _ = lax.while_loop(_condition, _step, initial_carry)
 
-    return Z.T, W
+    return Z.T, W.T

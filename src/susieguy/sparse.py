@@ -57,7 +57,7 @@ class SparseMatrix(lx.AbstractLinearOperator):
         return sparse.sparsify(jnp.matmul)(self.matrix, vector, precision=lax.Precision.HIGHEST)  # type: ignore
 
     def mm(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "n k"]:
-        return jax.vmap(self.matrix.mv, (1,), 1)(matrix)
+        return jax.vmap(self.mv, (1,), 1)(matrix)
 
     @dispatch
     def __matmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:

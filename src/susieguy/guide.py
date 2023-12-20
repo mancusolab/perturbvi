@@ -42,7 +42,7 @@ def _update_dense_beta(G: Array, params: ModelParams) -> ModelParams:
     # Updated beta
     updated_beta = out.value.T
 
-    return params._replace(mu_beta=updated_beta)
+    return params._replace(mean_beta=updated_beta)
 
 
 @dispatch
@@ -54,7 +54,7 @@ def _update_dense_beta(G: SparseMatrix, params: ModelParams) -> ModelParams:
 
     # Updated beta
     updated_beta = out.value.T
-    return params._replace(mu_beta=updated_beta)
+    return params._replace(mean_beta=updated_beta)
 
 
 class GuideModel(eqx.Module):
@@ -102,13 +102,13 @@ class SparseGuideModel(GuideModel):
     def update(self, params: ModelParams) -> ModelParams:
         # compute E[Z'k]G: remove the g-th effect
         # however notice that only intercept in non-zero in GtG off-diag
-        # ZkG = params.mu_z[:,kdx].T @ G - GtG_diag * params.B[-1,kdx]
+        # ZkG = params.mean_z[:,kdx].T @ G - GtG_diag * params.B[-1,kdx]
         # without intercept
         ZkG = params.mean_z.T @ self.guide_data
 
         # if we don't need to add/subtract we can do it all in one go
         var_beta = jnp.reciprocal(outer_add(params.tau_beta, self.gsq_diag))
-        mean_beta = ZkG * var_beta
+        mean_beta = (ZkG * var_beta)
         log_bf = (
             jnp.log(params.p)
             - jnp.log1p(params.p)
@@ -116,8 +116,8 @@ class SparseGuideModel(GuideModel):
         )
         p_hat = nn.sigmoid(log_bf)
         return params._replace(
-            mu_beta=mean_beta,
-            var_beta=var_beta,
+            mean_beta=mean_beta.T,
+            var_beta=var_beta.T,
             p_hat=p_hat,
         )
 

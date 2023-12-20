@@ -16,7 +16,7 @@ from .common import (
     ModelParams,
 )
 from .factorloadings import FactorModel, LoadingModel
-from .guide import GuideModel
+from .guide import DenseGuideModel, GuideModel, SparseGuideModel
 from .sparse import CenteredSparseMatrix, SparseMatrix
 from .utils import prob_pca
 
@@ -251,7 +251,7 @@ def _init_params(
     Raises:
         ValueError: Invalid initialization scheme.
     """
-    p_dim, z_dim, l_dim = loadings.shape
+    l_dim, z_dim, p_dim = loadings.shape
     tau_0 = jnp.ones((l_dim, z_dim))
 
     n_dim, p_dim = X.shape
@@ -275,10 +275,13 @@ def _init_params(
 
     if init == "pca":
         # run PCA and extract weights and latent
+        print("Initialize factors using probabilistic PCA")
         init_mu_z, _ = prob_pca(svd_key, X, k=z_dim)
+        print("Factor initialization finished.")
     elif init == "random":
         # random initialization
         init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
+        print("Factor initialization finished.")
     else:
         raise ValueError(f"Unknown initialization provided '{init}'; Choices: {type_options}")
 
@@ -295,7 +298,7 @@ def _init_params(
         pi = annotations.predict(ModelParams(theta=theta))  # type: ignore
     else:
         theta = None
-        pi = jnp.ones(p_dim) / p_dim
+        pi = jnp.ones(shape = (z_dim,p_dim)) / p_dim
 
     # Initialization for perturbation effects
     n_dim, g_dim = guide.shape
@@ -310,6 +313,7 @@ def _init_params(
     # Initialization of variational params for eta
     # p_hat is in shape of (z_dim,g_dim)
     p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
+    print("Model paramterters initialization finished.")
 
     return ModelParams(
         init_mu_z,
@@ -321,6 +325,7 @@ def _init_params(
         tau_0,
         theta=theta,
         pi=pi,
+        ann_state=None,
         mean_beta=init_mu_beta,
         var_beta=init_var_beta,
         tau_beta=tau_beta,
@@ -465,9 +470,9 @@ def infer(
     elif isinstance(X, sparse.JAXSparse):
         X = CenteredSparseMatrix(X, scale=standardize)  # type: ignore
     if isinstance(G, ArrayLike):
-        guide = GuideModel(jnp.asarray(G))
+        guide = DenseGuideModel(jnp.asarray(G))
     elif isinstance(G, sparse.JAXSparse):
-        guide = GuideModel(SparseMatrix(G))
+        guide = SparseGuideModel(SparseMatrix(G))
 
     if A is not None:
         adam = optax.adam(learning_rate)
@@ -479,7 +484,6 @@ def infer(
 
     factors = FactorModel(n, z_dim)
     loadings = LoadingModel(p, z_dim, l_dim)
-
     # initialize PRNGkey and params
     rng_key = random.PRNGKey(seed)
     params = _init_params(rng_key, X, guide, factors, loadings, annotation, p_prior, tau, init)
