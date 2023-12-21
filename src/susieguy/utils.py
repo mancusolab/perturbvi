@@ -31,7 +31,7 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
     w_key, z_key = rdm.split(rng_key, 2)
 
     # good enough for initialization
-    solver = lx.NormalCG(rtol=1e-3, atol=1e-3)
+    solver = lx.Cholesky()
 
     # check if reach the max_iter, or met the norm criterion every 100 iteration
     def _condition(carry):
@@ -45,20 +45,20 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
         i, W, Z, old_Z = carry
 
         # E step
-        W_op = lx.MatrixLinearOperator(W)
-        Z_new = multi_linear_solve(W_op, X.T, solver).value.T
+        W_op = lx.MatrixLinearOperator(W @ W.T, tags=lx.positive_semidefinite_tag)
+        Z_new = multi_linear_solve(W_op, W @ X.T, solver).value
 
         # M step
-        Z_op = lx.MatrixLinearOperator(Z_new.T)
-        W = multi_linear_solve(Z_op, X, solver).value
+        Z_op = lx.MatrixLinearOperator(Z_new.T @ Z_new, tags=lx.positive_semidefinite_tag)
+        W = multi_linear_solve(Z_op, Z_new.T @ X, solver).value.T
 
         return i + 1, W, Z_new, Z
 
-    W = rdm.normal(w_key, shape=(p_dim, k))
-    Z = rdm.normal(z_key, shape=(k, n_dim))
+    W = rdm.normal(w_key, shape=(k, p_dim))
+    Z = rdm.normal(z_key, shape=(n_dim, k))
     Z_zero = jnp.zeros_like(Z)
     initial_carry = 0, W, Z, Z_zero
 
     _, W, Z, _ = lax.while_loop(_condition, _step, initial_carry)
 
-    return Z.T, W.T
+    return Z, W

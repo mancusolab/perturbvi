@@ -34,19 +34,6 @@ def _is_valid(X: sparse.JAXSparse):
     return jnp.all(jnp.isfinite(X.data))
 
 
-@dispatch
-def _is_valid(G: ArrayLike):
-    return jnp.all(jnp.isfinite(G))
-
-
-@dispatch
-def _is_valid(G: sparse.JAXSparse):
-    return jnp.all(jnp.isfinite(G.data))
-
-
-# define EM algorithm for PPCA to extract PPCA initialization
-
-
 def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, params: ModelParams) -> ModelParams:
     n_dim, z_dim = params.mean_z.shape
     l_dim, z_dim, p_dim = params.mean_w.shape
@@ -298,7 +285,7 @@ def _init_params(
         pi = annotations.predict(ModelParams(theta=theta))  # type: ignore
     else:
         theta = None
-        pi = jnp.ones(shape = (z_dim,p_dim)) / p_dim
+        pi = jnp.ones(shape=(z_dim, p_dim)) / p_dim
 
     # Initialization for perturbation effects
     n_dim, g_dim = guide.shape
@@ -308,7 +295,10 @@ def _init_params(
     init_var_beta = (1 / tau_beta) * random.normal(var_beta_key, shape=(g_dim, z_dim)) ** 2
 
     # uniform prior for eta
-    p = p_prior * jnp.ones(g_dim)
+    if p_prior is not None:
+        p_prior = p_prior * jnp.ones(g_dim)
+    else:
+        p_prior = None
 
     # Initialization of variational params for eta
     # p_hat is in shape of (z_dim,g_dim)
@@ -329,7 +319,7 @@ def _init_params(
         mean_beta=init_mu_beta,
         var_beta=init_var_beta,
         tau_beta=tau_beta,
-        p=jnp.asarray(p),
+        p=p_prior,
         p_hat=p_hat,
     )
 
@@ -412,7 +402,7 @@ def infer(
     l_dim: int,
     G: ArrayLike | sparse.JAXSparse,
     A: Optional[ArrayLike | sparse.JAXSparse] = None,
-    p_prior: float = 0.5,
+    p_prior: Optional[float] = 0.5,
     tau: float = 1.0,
     standardize: bool = False,
     init: _init_type = "pca",
@@ -431,7 +421,8 @@ def infer(
         G: Secondary information. Should be an array-like or sparse JAX matrix.
         A: Annotation matrix to use in parameterized-prior mode. If not `None`, leading dimension
             should match the feature dimension of X.
-        p_prior: Prior probability for each perturbation being non-zero.
+        p_prior: Prior probability for each perturbation to have a non-zero effect to predict latent factor.
+            Set to `None` to use a dense, non-sparse model (i.e., OLS).
         tau: initial value of residual precision (default = 1)
         standardize: Whether to center and scale the input data with mean 0
             and variance 1 (default = False)
@@ -470,9 +461,14 @@ def infer(
     elif isinstance(X, sparse.JAXSparse):
         X = CenteredSparseMatrix(X, scale=standardize)  # type: ignore
     if isinstance(G, ArrayLike):
-        guide = DenseGuideModel(jnp.asarray(G))
+        G = jnp.asarray(G)
     elif isinstance(G, sparse.JAXSparse):
-        guide = SparseGuideModel(SparseMatrix(G))
+        G = SparseMatrix(G)
+
+    if p_prior is None or jnp.isclose(p_prior, 0.0):
+        guide = DenseGuideModel(G)
+    else:
+        guide = SparseGuideModel(G)
 
     if A is not None:
         adam = optax.adam(learning_rate)

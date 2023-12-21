@@ -108,7 +108,7 @@ class SparseGuideModel(GuideModel):
 
         # if we don't need to add/subtract we can do it all in one go
         var_beta = jnp.reciprocal(outer_add(params.tau_beta, self.gsq_diag))
-        mean_beta = (ZkG * var_beta)
+        mean_beta = ZkG * var_beta
         log_bf = (
             jnp.log(params.p)
             - jnp.log1p(params.p)
@@ -144,9 +144,6 @@ class SparseGuideModel(GuideModel):
 
 
 class DenseGuideModel(GuideModel):
-    prior_prob: float
-    p_hat: Array = field(init=False)
-
     def predict(self, params: ModelParams) -> Array:
         return self.guide_data @ params.mean_beta
 
