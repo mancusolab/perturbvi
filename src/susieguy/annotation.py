@@ -20,7 +20,7 @@ def _compute_pi(A: DataMatrix, theta: Array) -> Array:
 def _loss(theta: Array, args) -> Array:
     A, alpha = args
     pi = _compute_pi(A, theta)
-    return kl_discrete(alpha, pi)
+    return kl_discrete(alpha, pi), None
 
 
 class PriorModel(eqx.Module):
@@ -61,7 +61,7 @@ class AnnotationPriorModel(PriorModel):
         return self.A.shape
 
     def init_state(self, params: ModelParams) -> ModelParams:
-        args = (self.A, params)
+        args = (self.A, params.alpha)
         f_struct, aux_struct = jax.eval_shape(_loss, params.theta, args)
         return params._replace(
             ann_state=self.search.init(
@@ -73,8 +73,9 @@ class AnnotationPriorModel(PriorModel):
         return _compute_pi(self.A, params.theta)
 
     def update(self, params: ModelParams) -> ModelParams:
+        args = (self.A, params.alpha)
         # take one step using optimistix optimizer
-        theta, state, _ = self.step(params.theta, state=params.ann_state)
+        theta, state, _ = self.step(params.theta, state=params.ann_state, args = args)
         return params._replace(
             theta=theta,
             pi=_compute_pi(self.A, theta),

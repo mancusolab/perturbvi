@@ -211,3 +211,11 @@ def _(op):
 @lx.linearise.register(CenteredSparseMatrix)
 def _(op):
     return op
+
+@lx.conj.register(SparseMatrix)
+def _(op):
+    return SparseMatrix(op.matrix)
+
+@lx.conj.register(CenteredSparseMatrix)
+def _(op):
+    return CenteredSparseMatrix(op.data)

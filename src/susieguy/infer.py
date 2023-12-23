@@ -6,7 +6,7 @@ import equinox as eqx
 import optax
 import optimistix as optx
 
-from jax import numpy as jnp, random
+from jax import numpy as jnp, random, nn
 from jax.experimental import sparse
 from jaxtyping import Array, ArrayLike
 
@@ -145,6 +145,7 @@ def _inner_loop(
     params: ModelParams,
 ):
     # update annotation priors if any
+    params = annotation.init_state(params)
     params = annotation.update(params)
 
     # update loadings prior precision via ~Empirical Bayes and update variational params
@@ -183,7 +184,8 @@ def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelPa
     sorted_tau_0 = params.tau_0[:, sorted_indices]
     if isinstance(annotations, AnnotationPriorModel):
         sorted_theta = params.theta[:, sorted_indices]
-        sorted_pi = annotations.predict(ModelParams(theta=sorted_theta))  # type: ignore
+        #sorted_pi = annotations.predict(ModelParams(theta=sorted_theta))  # type: ignore
+        sorted_pi =annotations.predict(params._replace(theta=sorted_theta))
     else:
         sorted_theta = None
         sorted_pi = params.pi
@@ -282,7 +284,7 @@ def _init_params(
     if isinstance(annotations, AnnotationPriorModel):
         p_dim, m = annotations.shape
         theta = random.normal(theta_key, shape=(m, z_dim))
-        pi = annotations.predict(ModelParams(theta=theta))  # type: ignore
+        pi = nn.softmax(annotations.A @ theta, axis=0).T  # type: ignore
     else:
         theta = None
         pi = jnp.ones(shape=(z_dim, p_dim)) / p_dim
