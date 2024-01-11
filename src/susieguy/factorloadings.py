@@ -5,6 +5,7 @@ import equinox as eqx
 from jax import lax as lax, nn as nn, numpy as jnp
 from jaxtyping import Array
 
+#add point
 from .common import DataMatrix, ModelParams
 from .guide import GuideModel
 from .utils import kl_discrete, logdet
@@ -59,12 +60,12 @@ class FactorModel(eqx.Module):
         mean_z, var_z = params.mean_z, params.var_z
         pred_z = guide.predict(params)
         # tr(mean_zz) = tr(mean_z' mean_z) + tr(n * var_z)
-        #  = sum(mean_z ** 2) + n * k * tr(var_z)
+        #  = sum(mean_z ** 2) + n * tr(var_z)
         # NB: tr(E_q[Z]' M E_prior[Z]) = sum(E_q[Z] * (M E_prior[Z])); saves factor of n
         # guide.weighted_sumsq(params) = tr(M'E[BB']M); can change depending on guide model
         kl_d_ = 0.5 * (
             jnp.sum(mean_z**2)
-            + n_dim * z_dim * jnp.trace(var_z)
+            + n_dim * jnp.trace(var_z)
             - 2 * jnp.sum(mean_z * pred_z)
             + guide.weighted_sumsq(params)
             - n_dim * z_dim
