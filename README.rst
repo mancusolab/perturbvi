@@ -74,7 +74,7 @@ Support
 =======
 
 Please report any bugs or feature requests in the `Issue Tracker <https://github.com/mancusolab/perturbvi/issues>`_.
-If users have any questions or comments, please contact Eric Zhao (yzhao532@usc.edu) and Nicholas Mancuso (nmancuso@usc.edu).
+If users have any questions or comments, please contact Dong Yuan (dongyuan@usc.edu) and Nicholas Mancuso (nmancuso@usc.edu).
 
 .. _OtherSoftware:
 .. |Other Software| replace:: **Other Software**

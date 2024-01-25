@@ -1,7 +1,7 @@
-equinox                         # giddyup uses this, but we also preload for easier doc building
+equinox                         # perturbvi uses this, but we also preload for easier doc building
 # Install latest version of our dependencies
 jax[cpu]                        # core dependencies
-jaxtyping                       # giddyup uses this, but we also preload for easier doc building
+jaxtyping                       # perturbvi uses this, but we also preload for easier doc building
 jinja2                          # necessary for mkdocs and mkdocs ecosystem
 mkdocs                          # Main documentation generator.
 mkdocs-material                 # Theme

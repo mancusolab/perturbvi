@@ -1,11 +1,11 @@
-[![Documentation-webpage](https://img.shields.io/badge/Docs-Available-brightgreen)](https://mancusolab.github.io/giddyup/)
-[![PyPI-Server](https://img.shields.io/pypi/v/giddyup.svg)](https://pypi.org/project/giddyup/)
-[![Github](https://img.shields.io/github/stars/mancusolab/giddyup?style=social)](https://github.com/mancusolab/giddyup)
+[![Documentation-webpage](https://img.shields.io/badge/Docs-Available-brightgreen)](https://mancusolab.github.io/perturbvi/)
+[![PyPI-Server](https://img.shields.io/pypi/v/perturbvi.svg)](https://pypi.org/project/perturbvi/)
+[![Github](https://img.shields.io/github/stars/mancusolab/perturbvi?style=social)](https://github.com/mancusolab/perturbvi)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Project generated with Hatch](https://img.shields.io/badge/%F0%9F%A5%9A-Hatch-4051b5.svg)](https://github.com/pypa/hatch)
 
-# GiddyUp
-`giddyup` is a Python library to compute p-values of scores computed under exponential family models
+# perturbVI
+`perturbvi` is a Python library to compute p-values of scores computed under exponential family models
 using saddlepoint approximation of the sampling distribution.
 
   [**Installation**](#installation)
@@ -22,8 +22,8 @@ using saddlepoint approximation of the sampling distribution.
 Users can download the latest repository and then use `pip`:
 
 ``` bash
-git clone https://github.com/mancusolab/giddyup.git
-cd giddyup
+git clone https://github.com/mancusolab/perturbvi.git
+cd perturbvi
 pip install .
 ```
 
@@ -33,13 +33,13 @@ TBD
 
 ## Notes
 
--   `giddyup` uses [JAX](https://github.com/google/jax) with [Just In
+-   `perturbvi` uses [JAX](https://github.com/google/jax) with [Just In
     Time](https://jax.readthedocs.io/en/latest/jax-101/02-jitting.html)
     compilation to achieve high-speed computation. However, there are
     some [issues](https://github.com/google/jax/issues/5501) for JAX
     with Mac M1 chip. To solve this, users need to initiate conda using
     [miniforge](https://github.com/conda-forge/miniforge), and then
-    install `giddyup` using `pip` in the desired environment.
+    install `perturbvi` using `pip` in the desired environment.
 
 ## Version History
 
@@ -48,8 +48,8 @@ TBD
 ## Support
 
 Please report any bugs or feature requests in the [Issue
-Tracker](https://github.com/mancusolab/giddyup/issues). If users have
-any questions or comments, please contact Eric Zhao (<yzhao532@usc.edu>)
+Tracker](https://github.com/mancusolab/perturbvi/issues). If users have
+any questions or comments, please contact Dong Yuan (<dongyuan@usc.edu>)
 and Nicholas Mancuso (<nmancuso@usc.edu>).
 
 ## Other Software
@@ -79,7 +79,7 @@ Lab](https://www.mancusolab.com/):
 
 ------------------------------------------------------------------------
 
-`giddyup` is distributed under the terms of the
+`perturbvi` is distributed under the terms of the
 [MIT](https://spdx.org/licenses/MIT.html) license.
 
 

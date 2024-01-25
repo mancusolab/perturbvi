@@ -111,9 +111,6 @@ plugins:
 
 nav:
     - 'index.md'
-    - API:
-      - 'api/families.md'
-      - 'api/infer.md'
     - Misc:
         - 'authors.md'
         - 'versions.md'
