@@ -22,7 +22,7 @@ theme:  # pulled from optimistix
              name: Switch to light mode
     icon:
         repo: fontawesome/brands/github               # GitHub logo in top right
-        logo: "material/chart-bell-curve-cumulative"  # perturbvi logo in top left
+        logo: "material/tooltip-edit-outline"  # perturbvi logo in top left
     favicon: "_static/favicon.png"
     custom_dir: "docs/_overrides"  # Overriding part of the HTML
 
