@@ -1,5 +1,5 @@
 # version is auto-built by hatch, not need to store it...
-src/susieguy/_version.py
+src/perturbvi/_version.py
 
 test?.py
 

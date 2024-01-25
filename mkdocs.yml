@@ -22,17 +22,17 @@ theme:  # pulled from optimistix
              name: Switch to light mode
     icon:
         repo: fontawesome/brands/github               # GitHub logo in top right
-        logo: "material/chart-bell-curve-cumulative"  # susieguy logo in top left
+        logo: "material/chart-bell-curve-cumulative"  # perturbvi logo in top left
     favicon: "_static/favicon.png"
     custom_dir: "docs/_overrides"  # Overriding part of the HTML
 
 
-site_name: GiddyUp
-site_description: The documentation for the susieguy software library.
-site_url: https://mancusolab.github.io/susieguy
+site_name: perturbVI
+site_description: The documentation for the perturbVI software library.
+site_url: https://mancusolab.github.io/perturbvi
 
-repo_url: https://github.com/mancusolab/susieguy
-repo_name: mancusolab/susieguy
+repo_url: https://github.com/mancusolab/perturbvi
+repo_name: mancusolab/perturbvi
 edit_uri: ""  # No edit button, as some of our pages are in /docs and some in /examples via symlink, so it's impossible for them all to be accurate
 
 strict: true  # Don't allow warnings during the build process
@@ -87,7 +87,7 @@ plugins:
                     extensions:
                     - pydantic: {schema: true}
                     - docs/_scripts/extension.py:DynamicDocstrings:
-                        paths: [susieguy.families]
+                        paths: [perturbvi.families]
                     # general options
                     allow_inspection: true
                     show_bases: true

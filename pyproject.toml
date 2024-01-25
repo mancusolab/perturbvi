@@ -3,7 +3,7 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "susieguy"
+name = "perturbvi"
 dynamic = ["version"]
 description = ''
 readme = "README.rst"
@@ -36,15 +36,15 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/unknown/susieguy#readme"
-Issues = "https://github.com/unknown/susieguy/issues"
-Source = "https://github.com/unknown/susieguy"
+Documentation = "https://mancusolab.github.io/perturbvi"
+Issues = "https://github.com/mancusolab/perturbvi/issues"
+Source = "https://github.com/mancusolab/perturbvi"
 
 [tool.hatch.version]
 source = "vcs"
 
 [tool.hatch.build.hooks.vcs]
-version-file = "src/susieguy/_version.py"
+version-file = "src/perturbvi/_version.py"
 
 [tool.hatch.build.targets.sdist]
 include = ["src/"]
@@ -112,11 +112,11 @@ jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "optimistix", "optax"]
 [tool.pyright]
 reportIncompatibleMethodOverride = true
 reportIncompatibleVariableOverride = false  # Incompatible with eqx.AbstractVar
-include = ["susieguy", "tests"]
+include = ["perturbvi", "tests"]
 exclude = ["docs"]
 
 [tool.coverage.run]
-source_pkgs = ["susieguy", "tests"]
+source_pkgs = ["perturbvi", "tests"]
 branch = true
 parallel = true
 omit = [
@@ -124,8 +124,8 @@ omit = [
 ]
 
 [tool.coverage.paths]
-susieguy = ["src/susieguy", "*/susieguy/src/susieguy"]
-tests = ["tests", "*/susieguy/tests"]
+susieguy = ["src/perturbvi", "*/perturbvi/src/perturbvi"]
+tests = ["tests", "*/perturbvi/tests"]
 
 [tool.coverage.report]
 exclude_lines = [
