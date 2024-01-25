@@ -3,15 +3,15 @@
 
 .. image:: https://img.shields.io/badge/Docs-Available-brightgreen
     :alt: Documentation-webpage
-    :target: https://mancusolab.github.io/susieguy/
+    :target: https://mancusolab.github.io/perturbvi/
 
-.. image:: https://img.shields.io/pypi/v/susieguy.svg
+.. image:: https://img.shields.io/pypi/v/perturbvi.svg
     :alt: PyPI-Server
-    :target: https://pypi.org/project/susieguy/
+    :target: https://pypi.org/project/perturbvi/
 
-.. image:: https://img.shields.io/github/stars/mancusolab/susieguy?style=social
+.. image:: https://img.shields.io/github/stars/mancusolab/perturbvi?style=social
     :alt: Github
-    :target: https://github.com/mancusolab/susieguy
+    :target: https://github.com/mancusolab/perturbvi
 
 .. image:: https://img.shields.io/badge/License-MIT-yellow.svg
     :alt: License
@@ -22,9 +22,9 @@
     :target: https://github.com/pypa/hatch
 
 ======
-SusieGuy
+perturbVI
 ======
-``susieguy`` is a Python library to compute p-values of scores computed under exponential family models
+``perturbvi`` is a Python library to compute p-values of scores computed under exponential family models
 using saddlepoint approximation of the sampling distribution.
 
 
@@ -41,8 +41,8 @@ Users can download the latest repository and then use ``pip``:
 
 .. code:: bash
 
-    git clone https://github.com/mancusolab/susieguy.git
-    cd susieguy
+    git clone https://github.com/mancusolab/perturbvi.git
+    cd perturbvi
     pip install .
 
 .. _Example:
@@ -57,7 +57,7 @@ TBD
 
 Notes
 =====
-* ``susieguy`` uses `JAX <https://github.com/google/jax>`_ with `Just In Time  <https://jax.readthedocs.io/en/latest/jax-101/02-jitting.html>`_ compilation to achieve high-speed computation. However, there are some `issues <https://github.com/google/jax/issues/5501>`_ for JAX with Mac M1 chip. To solve this, users need to initiate conda using `miniforge <https://github.com/conda-forge/miniforge>`_, and then install ``susieguy`` using ``pip`` in the desired environment.
+* ``perturbvi`` uses `JAX <https://github.com/google/jax>`_ with `Just In Time  <https://jax.readthedocs.io/en/latest/jax-101/02-jitting.html>`_ compilation to achieve high-speed computation. However, there are some `issues <https://github.com/google/jax/issues/5501>`_ for JAX with Mac M1 chip. To solve this, users need to initiate conda using `miniforge <https://github.com/conda-forge/miniforge>`_, and then install ``perturbvi`` using ``pip`` in the desired environment.
 
 .. _Version:
 .. |Version| replace:: **Version**
@@ -73,7 +73,7 @@ TBD
 Support
 =======
 
-Please report any bugs or feature requests in the `Issue Tracker <https://github.com/mancusolab/susieguy/issues>`_.
+Please report any bugs or feature requests in the `Issue Tracker <https://github.com/mancusolab/perturbvi/issues>`_.
 If users have any questions or comments, please contact Eric Zhao (yzhao532@usc.edu) and Nicholas Mancuso (nmancuso@usc.edu).
 
 .. _OtherSoftware:
@@ -100,7 +100,7 @@ Feel free to use other software developed by `Mancuso Lab <https://www.mancusola
 
 .. _license:
 
-``susieguy`` is distributed under the terms of the `MIT <https://spdx.org/licenses/MIT.html>`_ license.
+``perturbvi`` is distributed under the terms of the `MIT <https://spdx.org/licenses/MIT.html>`_ license.
 
 
 ---------------------
