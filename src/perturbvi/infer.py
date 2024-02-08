@@ -409,7 +409,7 @@ def infer(
     standardize: bool = False,
     init: _init_type = "pca",
     learning_rate: float = 1e-2,
-    max_iter: int = 200,
+    max_iter: int = 400,
     tol: float = 1e-3,
     seed: int = 0,
     verbose: bool = True,
