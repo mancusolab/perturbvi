@@ -1,13 +1,13 @@
 from functools import partial
 
+import numpy as np
+
 import equinox as eqx
 import jax.scipy.special as jspec
 import lineax as lx
-import numpy as np
 
 from jax import jit, lax, numpy as jnp, random as rdm
 from jaxtyping import Array
-from jax.experimental import sparse
 
 
 multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
@@ -66,7 +66,9 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
 
     return Z, W
 
-#Create function to evaluate Local False Sign Rate
+
+# Create function to evaluate Local False Sign Rate
+
 
 # First Create a function to sample single effect matrix based on params.alpha
 def bern_sample(alpha):
@@ -88,23 +90,23 @@ def bern_sample(alpha):
 
     return efficient_result_matrix
 
-def compute_lfsr(params, iters = 2000):
-    
+
+def compute_lfsr(params, iters=2000):
     l_dim, z_dim, p_dim = params.alpha.shape
-    g_dim,_ = params.mean_beta.shape
+    g_dim, _ = params.mean_beta.shape
     # Reshaping the var_w to (L by K) such that each value in var_w repeats P times
     reshaped_var_w = np.repeat(params.var_w[:, :, np.newaxis], p_dim, axis=2)
     # Initialize count matrix
-    total_pos_zero = jnp.zeros(shape=(g_dim,p_dim))
-    total_neg_zero = jnp.zeros(shape=(g_dim,p_dim))
+    total_pos_zero = jnp.zeros(shape=(g_dim, p_dim))
+    total_neg_zero = jnp.zeros(shape=(g_dim, p_dim))
 
     for i in range(iters):
-        sample_w = np.random.normal(loc = params.mean_w, scale = np.sqrt(reshaped_var_w))
+        sample_w = np.random.normal(loc=params.mean_w, scale=np.sqrt(reshaped_var_w))
         sample_alpha = bern_sample(params.alpha)
         sample_W = np.sum(sample_w * sample_alpha, axis=0)
 
-        sample_eta = np.random.binomial(1,params.p_hat.T)
-        sample_beta = np.random.normal(loc = params.mean_beta, scale = np.sqrt(params.var_beta))
+        sample_eta = np.random.binomial(1, params.p_hat.T)
+        sample_beta = np.random.normal(loc=params.mean_beta, scale=np.sqrt(params.var_beta))
         sample_B = sample_beta * sample_eta
 
         sample_oe = sample_B @ sample_W
@@ -115,6 +117,6 @@ def compute_lfsr(params, iters = 2000):
         total_neg_zero = total_neg_zero + ind_neg
         if (i + 1) % 100 == 0:
             print(f"{i - 99}-{i + 1} iters complete")
-    
-    lfsr = np.minimum(total_pos_zero,total_neg_zero)/iters
+
+    lfsr = np.minimum(total_pos_zero, total_neg_zero) / iters
     return lfsr

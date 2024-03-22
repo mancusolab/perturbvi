@@ -1,9 +1,10 @@
 from typing import NamedTuple, Optional
 
-import jax.numpy as jnp
 import numpy as np
 
-from jax import nn, random
+import jax.numpy as jnp
+
+from jax import random
 from jax.typing import ArrayLike
 
 
@@ -32,22 +33,20 @@ class SimulatedData(NamedTuple):
 
 # Define the function to generate design matrix.
 # Ensure each perturbation is at least assigned to a cell
-def create_design_matrix(key , n_dim, g_dim):
+def create_design_matrix(key, n_dim, g_dim):
     if g_dim > n_dim:
-        raise ValueError(
-            f"g_dim should be less than n: received g_dim = {g_dim}, n = {n_dim}"
-        )
+        raise ValueError(f"g_dim should be less than n: received g_dim = {g_dim}, n = {n_dim}")
     # Initialize the matrix with zeros
     # Assign each perturbation exactly once
     G = jnp.identity(g_dim)
 
     # Randomly assign remaining perturbations
     np.random.seed(key)
-    indices = np.random.choice(g_dim, size=n_dim-g_dim)
-    G_left = np.zeros((n_dim-g_dim, g_dim), dtype=int)
-    G_left[np.arange(n_dim-g_dim), indices] = 1
-    
-    G = jnp.concatenate((G, G_left),axis=0)
+    indices = np.random.choice(g_dim, size=n_dim - g_dim)
+    G_left = np.zeros((n_dim - g_dim, g_dim), dtype=int)
+    G_left[np.arange(n_dim - g_dim), indices] = 1
+
+    G = jnp.concatenate((G, G_left), axis=0)
     return G
 
 
@@ -58,7 +57,7 @@ def generate_sim(
     p_dim: int,
     z_dim: int,
     g_dim: int,
-    b_sparsity: float = 0.2, 
+    b_sparsity: float = 0.2,
     effect_size: float = 1.0,
 ) -> SimulatedData:
     """Create the function to generate a sparse data for PCA. Please note that to
@@ -94,9 +93,7 @@ def generate_sim(
 
     # dimension check
     if l_dim > p_dim:
-        raise ValueError(
-            f"l_dim should be less than p: received l_dim = {l_dim}, p = {p_dim}"
-        )
+        raise ValueError(f"l_dim should be less than p: received l_dim = {l_dim}, p = {p_dim}")
     if l_dim > p_dim / z_dim:
         raise ValueError(
             f"""l_dim is smaller than p_dim/z_dim,
@@ -107,28 +104,20 @@ def generate_sim(
         raise ValueError(f"l_dim should be positive: received l_dim = {l_dim}")
 
     if z_dim > p_dim:
-        raise ValueError(
-            f"z_dim should be less than p: received z_dim = {z_dim}, p = {p_dim}"
-        )
+        raise ValueError(f"z_dim should be less than p: received z_dim = {z_dim}, p = {p_dim}")
     if z_dim > n_dim:
-        raise ValueError(
-            f"z_dim should be less than n: received z_dim = {z_dim}, n = {n_dim}"
-        )
+        raise ValueError(f"z_dim should be less than n: received z_dim = {z_dim}, n = {n_dim}")
     if z_dim <= 0:
         raise ValueError(f"z_dim should be positive: received z_dim = {z_dim}")
 
     if effect_size <= 0:
-        raise ValueError(
-            f"effect size should be positive: received effect_size = {effect_size}"
-        )
+        raise ValueError(f"effect size should be positive: received effect_size = {effect_size}")
 
     # random W
     W = jnp.zeros(shape=(z_dim, p_dim))
 
     for k in range(z_dim):
-        W = W.at[k, (k * l_dim) : ((k + 1) * l_dim)].set(
-            effect_size * random.normal(b_key, shape=(l_dim,))
-        )
+        W = W.at[k, (k * l_dim) : ((k + 1) * l_dim)].set(effect_size * random.normal(b_key, shape=(l_dim,)))
 
     # linear function to generate Z
     # perturbation effects
@@ -140,10 +129,10 @@ def generate_sim(
         beta_key, beta_key_2 = random.split(beta_key)
         # Step 2: Randomly select `non_zero_num` indices without replacement
         indices = random.choice(beta_key, g_dim, shape=(non_zero_num,), replace=False)
-            
+
         # Step 3: Generate `non_zero_num` random values from a normal distribution
         random_values = random.normal(beta_key_2, (non_zero_num,))
-            
+
         # Update the selected entries in the column with random values
         beta = beta.at[indices, col].set(random_values)
 

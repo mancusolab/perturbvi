@@ -75,7 +75,7 @@ class AnnotationPriorModel(PriorModel):
     def update(self, params: ModelParams) -> ModelParams:
         args = (self.A, params.alpha)
         # take one step using optimistix optimizer
-        theta, state, _ = self.step(params.theta, state=params.ann_state, args = args)
+        theta, state, _ = self.step(params.theta, state=params.ann_state, args=args)
         return params._replace(
             theta=theta,
             pi=_compute_pi(self.A, theta),

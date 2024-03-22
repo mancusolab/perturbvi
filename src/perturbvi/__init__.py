@@ -7,9 +7,9 @@ from .infer import (
     compute_pve as compute_pve,
     infer as infer,
 )
+from .sim import generate_sim as generate_sim
+from .utils import compute_lfsr as compute_lfsr
 
-from .sim import (generate_sim as generate_sim)
-from .utils import (compute_lfsr as compute_lfsr)
 
 try:
     # Change here if project is renamed and does not equal the package name

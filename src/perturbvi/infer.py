@@ -6,7 +6,7 @@ import equinox as eqx
 import optax
 import optimistix as optx
 
-from jax import numpy as jnp, random, nn
+from jax import nn, numpy as jnp, random
 from jax.experimental import sparse
 from jaxtyping import Array, ArrayLike
 
@@ -51,7 +51,6 @@ def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, para
 
 
 class ELBOResults(NamedTuple):
-
     """Define the class of all components in ELBO.
 
     Attributes:
@@ -184,8 +183,8 @@ def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelPa
     sorted_tau_0 = params.tau_0[:, sorted_indices]
     if isinstance(annotations, AnnotationPriorModel):
         sorted_theta = params.theta[:, sorted_indices]
-        #sorted_pi = annotations.predict(ModelParams(theta=sorted_theta))  # type: ignore
-        sorted_pi =annotations.predict(params._replace(theta=sorted_theta))
+        # sorted_pi = annotations.predict(ModelParams(theta=sorted_theta))  # type: ignore
+        sorted_pi = annotations.predict(params._replace(theta=sorted_theta))
     else:
         sorted_theta = None
         sorted_pi = params.pi

@@ -5,7 +5,7 @@ import equinox as eqx
 from jax import lax as lax, nn as nn, numpy as jnp
 from jaxtyping import Array
 
-#add point
+# add point
 from .common import DataMatrix, ModelParams
 from .guide import GuideModel
 from .utils import kl_discrete, logdet
@@ -113,9 +113,9 @@ def _update_susie_effect(ldx: int, effect_params: _EffectLoopResults) -> _Effect
     log_bf = _log_bf_np(Z_s, s2_s, s20_s)
     # notice that pi is 1-D array for model without annotation
     # changed in the init_params
-    log_alpha = jnp.log(params.pi[kdx,:]) + log_bf
+    log_alpha = jnp.log(params.pi[kdx, :]) + log_bf
     alpha_kl = nn.softmax(log_alpha)
-    
+
     # update marginal w_kl
     Wk = Wkl + (update_mean_wkl * alpha_kl)
     params = params._replace(
