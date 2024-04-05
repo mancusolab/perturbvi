@@ -1,4 +1,4 @@
 # Contributors
 
-* Eric Zhao <yzhao532@usc.edu>
+* Dong Yuan <dongyuan@usc.edu>
 * Nicholas Mancuso <nmancuso@usc.edu>
