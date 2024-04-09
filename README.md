@@ -5,8 +5,7 @@
 [![Project generated with Hatch](https://img.shields.io/badge/%F0%9F%A5%9A-Hatch-4051b5.svg)](https://github.com/pypa/hatch)
 
 # perturbVI
-`perturbvi` is a Python library to compute p-values of scores computed under exponential family models
-using saddlepoint approximation of the sampling distribution.
+`perturbvi` is a scalable approach to infer regulatory modules through informative latent component model in the single-cell Perturb-seq data.
 
   [**Installation**](#installation)
   | [**Example**](#get-started-with-example)
