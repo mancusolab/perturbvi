@@ -111,6 +111,9 @@ plugins:
 
 nav:
     - 'index.md'
+    - API:
+        - 'api/infer.md'
+        - 'api/utils.md'
     - Misc:
         - 'authors.md'
         - 'versions.md'

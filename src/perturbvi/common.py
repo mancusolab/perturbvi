@@ -14,7 +14,7 @@ FloatOrArray = Union[float, ArrayLike]
 class ModelParams(NamedTuple):
     """
     Define the class for variational parameters of all the variable we need
-    to infer from the SuSiE PCA.
+    to infer from the perturbVI.
 
     Attributes:
         mean_z: mean parameter for factor Z
@@ -25,9 +25,14 @@ class ModelParams(NamedTuple):
                 distribution
         tau: inverse variance parameter of observed data X
         tau_0: inverse variance parameter of single effect w_kl
+        theta: parameter for annotation prior
         pi: prior probability for gamma
-        beta: parameters for perturbation matrix
-
+        ann_state: internal state for learning theta
+        mean_beta: mean parameters for perturbation effect matrix
+        var_beta: variance parameters for perturbation effect matrix
+        tau_beta: inverse variance parameters for perturbation effect matrix
+        p: prior for Eta from spike-and-slab prior
+        p_hat: variational parameters for Eta
     """
 
     # variational params for Z

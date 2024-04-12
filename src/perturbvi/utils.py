@@ -22,11 +22,44 @@ def logdet(A: Array) -> Array:
 
 
 def kl_discrete(alpha: Array, pi: Array) -> Array:
+    """A function that calculates the Kullback-Leibler divergence for multinomial distributions
+
+    **Arguments:**
+
+    -`alpha` [`Array`]: An array representing the first discrete distribution.
+
+    -`pi` [`Array`]: An array representing the second discrete distribution.
+
+    **Returns:**
+
+    The Kullback-Leibler divergence between the two distributions.
+    """
     return jnp.sum(jspec.xlogy(alpha, alpha) - jspec.xlogy(alpha, pi))
 
 
 @partial(jit, static_argnums=(2, 3, 4))
 def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
+    """Probabilistic PCA algorithm to initialize latent factors.
+
+    **Arguments:**
+
+    -`rng_key` [`PRNGKey`]: Random key generator.
+
+    -`X` [`Array`]: The observed data.
+
+    -`k` [`int`]: The latent dimension.
+
+    -`max_iter` [`int`]: The maximum number of iterations, default is 1000.
+
+    -`tol` [`float`]: The convergence tolerance, default is 1e-3.
+
+    **Returns:**
+
+    - `Z` [`Array`]: The estimated latent factors.
+
+    -`W` [`Array`]: The estimated loadings.
+    """
+
     n_dim, p_dim = X.shape
 
     # initial guess for W
@@ -68,10 +101,19 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
 
 
 # Create function to evaluate Local False Sign Rate
-
-
 # First Create a function to sample single effect matrix based on params.alpha
 def bern_sample(alpha):
+    """Sample from a Bernoulli distribution with probability alpha.
+    
+    **Arguments:**
+    
+    - `alpha` [`Array`]: The probability of each row in the L x K matrix.
+    
+    **Returns:**
+    
+    - `efficient_result_matrix` [`Array`]: The sampled matrix.
+    
+    """
     l_dim, z_dim, p_dim = alpha.shape
     # Generate random numbers for each row in the L x K matrix
     # These random numbers are used as indices for selecting features
@@ -92,6 +134,19 @@ def bern_sample(alpha):
 
 
 def compute_lfsr(params, iters=2000):
+    """Compute the LFSR (Local False Sign Rate) using the given parameters.
+
+    **Arguments:**
+
+    - `params` [`ModelParams`]: The parameters of the model.
+
+    - `iters` [`int`]: The number of iterations to run the algorithm. Default is 2000.
+
+    **Returns:**
+
+    - `lfsr` [`Array`]: The LFSR for each of `L` single effects.
+
+    """
     l_dim, z_dim, p_dim = params.alpha.shape
     g_dim, _ = params.mean_beta.shape
     # Reshaping the var_w to (L by K) such that each value in var_w repeats P times

@@ -53,15 +53,13 @@ def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, para
 class ELBOResults(NamedTuple):
     """Define the class of all components in ELBO.
 
-    Attributes:
+    **Arguments:**
         elbo: the value of ELBO
         expected_loglike: Expectation of log-likelihood
         kl_factors: -KL divergence of Z
         kl_loadings: -KL divergence of W
-        negKL_gamma: -KL divergence of Gamma
         kl_guide: -KL divergence of B
-        negKL_eta: -KL divergence of Eta
-
+    
     """
 
     elbo: Array
@@ -89,14 +87,23 @@ def compute_elbo(
 ) -> ELBOResults:
     """Create function to compute evidence lower bound (ELBO)
 
-    Args:
-        X: the observed data, an N by P ndarray
-        G: secondary data.
-        GtG_diag: diagonal element of GTG.
-        params: the dictionary contains all the infered parameters
+    **Arguments:**
 
-    Returns:
-        ELBOResult_Design: the object contains all components in ELBO
+    - `X` [`Array`]: The observed data, an N by P ndarray
+
+    - `guide` [`GuideModel`]: The guide model
+
+    - `factors` [`FactorModel`]: The factor model
+
+    - `loadings` [`LoadingModel`]: The loading model
+
+    - `annotation` [`PriorModel`]: The prior annotation model
+
+    - `params` [`ModelParams`]: The dictionary contains all the infered parameters
+
+    **Returns:**
+
+    - `ELBOResults` [`ELBOResults`]: The object contains all components in ELBO
 
     """
     n_dim, z_dim = params.mean_z.shape
@@ -221,20 +228,32 @@ def _init_params(
     tau: float = 1.0,
     init: _init_type = "pca",
 ) -> ModelParams:
-    """Initialize parameters for SuSiE PCA.
+    """Initialize parameters for PerturbVI
 
-    Args:
-        rng_key: Random number generator seed
-        X: Input data. Should be an array-like
-        z_dim: Latent factor dimension (K)
-        l_dim: Number of single-effects comprising each factor (L)
-        p_prior: Prior probability for each perturbation being non-zero.
-        init: How to initialize the variational mean parameters for latent factors.
-            Either "pca" or "random" (default = "pca")
-        tau: initial value of residual precision
+    **Arguments:**
 
-    Returns:
-        ModelParams: initialized set of model parameters.
+    -`rng_key` [`PRNGKey`]: Random number generator seed
+
+    -`X` [`Array`]: Input data. Should be an array-like
+
+    -`guide` [`GuideModel`]: Guide model
+
+    -`factors` [`FactorModel`]: Factor model
+
+    -`loadings` [`LoadingModel`]: Loadings model
+
+    -`annotations` [`PriorModel`]: Annotation model
+
+    -`p_prior` [`float`]: Prior probability for each perturbation being non-zero.
+
+    -`tau` [`float`]: Initial value of residual precision
+
+    -`init` [`str`]: How to initialize the variational mean parameters for latent factors.
+        Either "pca" or "random" (default = "pca")
+
+    **Returns:**
+
+    -`ModelParams` [`ModelParams`]: Initialized set of model parameters
 
     Raises:
         ValueError: Invalid initialization scheme.
@@ -415,39 +434,42 @@ def infer(
 ) -> InferResults:
     """The main inference function for SuSiE PCA.
 
-    Args:
-        X: Input data. Should be an array-like
-        z_dim: Latent factor dimension (int; K)
-        l_dim: Number of single-effects comprising each factor (int; L)
-        G: Secondary information. Should be an array-like or sparse JAX matrix.
-        A: Annotation matrix to use in parameterized-prior mode. If not `None`, leading dimension
-            should match the feature dimension of X.
-        p_prior: Prior probability for each perturbation to have a non-zero effect to predict latent factor.
-            Set to `None` to use a dense, non-sparse model (i.e., OLS).
-        tau: initial value of residual precision (default = 1)
-        standardize: Whether to center and scale the input data with mean 0
-            and variance 1 (default = False)
-        init: How to initialize the variational mean parameters for latent factors.
-            Either "pca" or "random" (default = "pca")
-        learning_rate: Learning rate for prior annotation probability inference. Not used if `A` is `None`.
-        max_iter: Maximum number of iterations for inference (int)
-        tol: Numerical tolerance for ELBO convergence (float)
-        seed: Seed for "random" initialization (int)
-        verbose: Flag to indicate displaying log information (ELBO value) in each
-            iteration
+    **Arguments:**
 
-    Returns:
-        :py:obj:`SuSiEPCAResults_Design`: tuple that has member variables for learned
-        parameters (:py:obj:`ModelParams_Design`), evidence lower bound (ELBO) results
-        (:py:obj:`ELBOResults`) from the last iteration, the percent of variance
-        explained (PVE) for each of the `K` factors (:py:obj:`jax.numpy.ndarray`),
-        the posterior inclusion probabilities (PIPs) for each of the `K` factors
-        and `P` features (:py:obj:`jax.numpy.ndarray`).
+    -`X` [`Array`|`JAXSparse`]: The expression count matrix. Should be an array-like or sparse JAX matrix.
 
-    Raises:
-        ValueError: Invalid `l_dim` or `z_dim` values. Invalid initialization scheme.
-        Data `X` contains `inf` or `nan`. If annotation matrix `A` is not `None`, raises
-        if `A` contains `inf`, `nan` or does not match feature dimension with `X`.
+    -`z_dim` [`int`]: The latent dimension.
+
+    -`l_dim` [`int`]: The number of single effects in each factor.
+
+    -`G` [`Array`|`JAXSparse`]: Perturbation density matrix. Should be an array-like or sparse JAX matrix.
+
+    -`A` [`Array`]: Annotation matrix to use in parameterized-prior mode. If not `None`, leading dimension
+        should match the feature dimension of X.
+
+    -`p_prior` [`float`]: Prior probability for each perturbation to have a non-zero effect to predict latent factor. (default = 0.5)
+
+    -`tau` [`float`]: initial value of residual precision (default = 1)
+
+    -`standardize` [`bool`]: Whether to scale the input data with variance 1 (default = False)
+
+    -`init` [`str`]: How to initialize the variational mean parameters for latent factors.
+        Either "pca" or "random" (default = "pca").
+
+    -`learning_rate` [`float`]: Learning rate for prior annotation probability inference. Not used if `A` is `None`.
+
+    -`max_iter` [`int`]: Maximum number of iterations for inference.
+
+    -`tol` [`float`]: Convergence tolerance for inference.
+
+    -`seed` [`int`]: Numerical tolerance for ELBO convergence.
+
+    -`verbose` [`bool`]: Flag to indicate displaying log information (ELBO value) in each
+            iteration.
+
+    **Returns:**
+
+    -`InferResults`: The dictionary contain all the infered parameters.
     """
 
     # sanity check arguments
@@ -517,12 +539,15 @@ def infer(
 def compute_pip(params: ModelParams) -> Array:
     """Compute the posterior inclusion probabilities (PIPs).
 
-    Args:
-        params: instance of inferred parameters
+    **Arguments:**
 
-    Returns:
-        Array: Array of posterior inclusion probabilities (PIPs) for each of
-        `K x P` factor, feature combinations
+    -`params` [`ModelParams`]: Instance of inferred parameters
+
+    **Returns:**
+
+    -`PIP` [`Array`]: Array of posterior inclusion probabilities (PIPs) for each of `K x P` factor, 
+              feature combinations
+
     """
 
     pip = -jnp.expm1(jnp.sum(jnp.log1p(-params.alpha), axis=0))
@@ -533,12 +558,14 @@ def compute_pip(params: ModelParams) -> Array:
 def compute_pve(params: ModelParams) -> Array:
     """Compute the percent of variance explained (PVE).
 
-    Args:
-        params: instance of inferred parameters
+    **Arguments:**
 
-    Returns:
-        Array: Array of length `K` that contains percent of variance
-        explained by each factor (PVE)
+    -`params` [`ModelParams`]: Instance of inferred parameters
+
+    **Returns:**
+
+    -`PVE` [`Array`]: Array of length `K` that contains percent of variance
+              explained by each factor (PVE)
     """
 
     n_dim, z_dim = params.mean_z.shape

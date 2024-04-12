@@ -5,7 +5,6 @@ import equinox as eqx
 from jax import lax as lax, nn as nn, numpy as jnp
 from jaxtyping import Array
 
-# add point
 from .common import DataMatrix, ModelParams
 from .guide import GuideModel
 from .utils import kl_discrete, logdet
