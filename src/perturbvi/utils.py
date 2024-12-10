@@ -1,6 +1,7 @@
 from functools import partial
 
 import numpy as np
+import pandas as pd
 
 import equinox as eqx
 import jax.scipy.special as jspec
@@ -104,15 +105,15 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
 # First Create a function to sample single effect matrix based on params.alpha
 def bern_sample(alpha):
     """Sample from a Bernoulli distribution with probability alpha.
-    
+
     **Arguments:**
-    
+
     - `alpha` [`Array`]: The probability of each row in the L x K matrix.
-    
+
     **Returns:**
-    
+
     - `efficient_result_matrix` [`Array`]: The sampled matrix.
-    
+
     """
     l_dim, z_dim, p_dim = alpha.shape
     # Generate random numbers for each row in the L x K matrix
@@ -175,3 +176,37 @@ def compute_lfsr(params, iters=2000):
 
     lfsr = np.minimum(total_pos_zero, total_neg_zero) / iters
     return lfsr
+
+
+def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
+    """Create a function to give a quick summary of PIPs
+
+    Args:
+        pip:the pip matrix, a ndarray from results object returned by
+        infer.perturbvi
+
+    """
+    z_dim, p_dim = pip.shape
+    results = []
+
+    print(f"Of {p_dim} features from the data, SuSiE PCA identifies:")
+    for k in range(z_dim):
+        num_signal = jnp.where(pip[k, :] >= rho)[0].shape[0]
+        num_zero = jnp.where(pip[k, :] < rho_prime)[0].shape[0]
+        print(
+            f"Component {k} has {num_signal} features with pip>{rho}; " f"and {num_zero} features with pip<{rho_prime}"
+        )
+        results.append([num_signal, num_zero])
+
+    df = pd.DataFrame(results, columns=["num_signal", "num_zero"])
+
+    # Calculate and print mean and standard deviation for each column
+    mean_signal = df["num_signal"].mean()
+    std_signal = df["num_signal"].std()
+    mean_zero = df["num_zero"].mean()
+    std_zero = df["num_zero"].std()
+
+    print(f"Mean and standard deviation for num_signal: {mean_signal}, {std_signal}")
+    print(f"Mean and standard deviation for num_zero: {mean_zero}, {std_zero}")
+
+    return df
