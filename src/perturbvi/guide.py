@@ -26,6 +26,17 @@ def _get_diag(G: Array) -> Array:
 def _get_diag(G: SparseMatrix) -> Array:
     return jsparse.sparsify(jnp.sum)(G.matrix**2, axis=0).todense()  # type: ignore
 
+@dispatch
+def _wgt_sumsq(G: SparseMatrix, vector: Array) -> Array:
+    tmp = G.matrix * vector
+    return jsparse.sparsify(jnp.sum)(tmp**2)  # type: ignore
+
+
+@dispatch
+def _wgt_sumsq(G: Array, vector: Array) -> Array:
+    tmp = G * vector
+    return jnp.sum(tmp ** 2)
+
 
 _multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
 
@@ -97,14 +108,17 @@ class SparseGuideModel(GuideModel):
 
     def weighted_sumsq(self, params: ModelParams) -> Array:
         mean_bb = jnp.sum((params.mean_beta**2 + params.var_beta) * params.p_hat.T, axis=1)
-        return jnp.sum(self.gsq_diag * mean_bb)
+        return _wgt_sumsq(self.guide_data, jnp.sqrt(mean_bb))
 
     def update(self, params: ModelParams) -> ModelParams:
         # compute E[Z'k]G: remove the g-th effect
         # however notice that only intercept in non-zero in GtG off-diag
         # ZkG = params.mean_z[:,kdx].T @ G - GtG_diag * params.B[-1,kdx]
         # without intercept
-        ZkG = params.mean_z.T @ self.guide_data
+        #import jax;jax.debug.breakpoint()
+        pred = self.predict(params)
+        tmp = (params.mean_beta * params.p_hat.T) * self.gsq_diag[:, jnp.newaxis]
+        ZkG = params.mean_z.T @ self.guide_data - pred.T @ self.guide_data + tmp.T
 
         # if we don't need to add/subtract we can do it all in one go
         var_beta = jnp.reciprocal(outer_add(params.tau_beta, self.gsq_diag))
