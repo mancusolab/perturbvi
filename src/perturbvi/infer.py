@@ -35,8 +35,8 @@ def _is_valid(X: sparse.JAXSparse):
 
 
 def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, params: ModelParams) -> ModelParams:
-    n_dim, z_dim = params.mean_z.shape
-    l_dim, z_dim, p_dim = params.mean_w.shape
+    n_dim, _ = params.mean_z.shape
+    _, _, p_dim = params.mean_w.shape
 
     # calculate moments of factors and loadings
     mean_z, mean_zz = factor.moments(params)
@@ -59,7 +59,7 @@ class ELBOResults(NamedTuple):
         kl_factors: -KL divergence of Z
         kl_loadings: -KL divergence of W
         kl_guide: -KL divergence of B
-    
+
     """
 
     elbo: Array
@@ -100,8 +100,8 @@ def compute_elbo(
     - `ELBOResults` [`ELBOResults`]: The object contains all components in ELBO
 
     """
-    n_dim, z_dim = params.mean_z.shape
-    l_dim, z_dim, p_dim = params.mean_w.shape
+    n_dim, _ = params.mean_z.shape
+    _, _, p_dim = params.mean_w.shape
 
     # calculate second moment of Z along k, (k x k) matrix
     # E[Z'Z] = V_k[Z] * tr(I_n) + E[Z]'E[Z] = V_k[Z] * n + E[Z]'E[Z]
@@ -111,10 +111,11 @@ def compute_elbo(
     mean_w, mean_ww = loadings.moments(params)
 
     # expectation of log likelihood
-    # calculation tip: tr(A @ A.T) = tr(A.T @ A) = sum(A ** 2)
+    # calculation tip: tr(A @ A.T) = tr(A.T @ A) = sum(A ** 2); but doubles mem
+    # tr(A.T @ A) is inner product of A with itself = vdot(X, X)
     # (X.T @ E[Z] @ E[W]) is p x p (big!); compute (E[W] @ X.T @ E[Z]) (k x k)
     exp_logl = (-0.5 * params.tau) * (
-        jnp.sum(X**2)
+        jnp.vdot(X, X)
         - 2 * jnp.einsum("kp,np,nk->", mean_w, X, mean_z)  # tr(E[W] @ X.T @ E[Z])
         + jnp.einsum("ij,ji->", mean_zz, mean_ww)  # tr(E[Z.T @ Z] @ E[W @ W.T])
     ) + 0.5 * n_dim * p_dim * jnp.log(params.tau)
@@ -267,9 +268,8 @@ def _init_params(
         alpha_key,
         beta_key,
         var_beta_key,
-        p_key,
         theta_key,
-    ) = random.split(rng_key, 11)
+    ) = random.split(rng_key, 10)
 
     # pull type options for init
     type_options = get_args(_init_type)
@@ -441,7 +441,8 @@ def infer(
     -`A` [`Array`]: Annotation matrix to use in parameterized-prior mode. If not `None`, leading dimension
         should match the feature dimension of X.
 
-    -`p_prior` [`float`]: Prior probability for each perturbation to have a non-zero effect to predict latent factor. (default = 0.5)
+    -`p_prior` [`float`]: Prior probability for each perturbation to have a non-zero effect to predict latent factor.
+        (default = 0.5)
 
     -`tau` [`float`]: initial value of residual precision (default = 1)
 
@@ -463,7 +464,7 @@ def infer(
 
     **Returns:**
 
-    -`InferResults`: The dictionary contain all the infered parameters.
+    An [`InferResults`][] object  contain all the infered parameters.
     """
 
     # sanity check arguments
@@ -539,7 +540,7 @@ def compute_pip(params: ModelParams) -> Array:
 
     **Returns:**
 
-    -`PIP` [`Array`]: Array of posterior inclusion probabilities (PIPs) for each of `K x P` factor, 
+    -`PIP` [`Array`]: Array of posterior inclusion probabilities (PIPs) for each of `K x P` factor,
               feature combinations
 
     """

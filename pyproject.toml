@@ -92,7 +92,6 @@ ignore = [
     # Ignore multidispatch false positives
     "F811",
 ]
-ignore-init-module-imports = true
 
 [tool.ruff.lint.isort]
 known-first-party = ["susieguy"]

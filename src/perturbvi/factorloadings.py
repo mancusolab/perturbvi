@@ -30,7 +30,7 @@ class FactorModel(eqx.Module):
 
     def update(self, data: DataMatrix, guide: GuideModel, loadings: "LoadingModel", params: ModelParams) -> ModelParams:
         mean_w, mean_ww = loadings.moments(params)
-        n_dim, z_dim = self.shape
+        _, z_dim = self.shape
 
         update_var_z = jnp.linalg.inv(params.tau * mean_ww + jnp.identity(z_dim))
         update_mu_z = (params.tau * (data @ mean_w.T) + guide.predict(params)) @ update_var_z
@@ -41,7 +41,7 @@ class FactorModel(eqx.Module):
         )
 
     def moments(self, params: ModelParams) -> FactorMoments:
-        n_dim, z_dim = self.shape
+        n_dim, _ = self.shape
 
         # compute expected residuals
         # use posterior mean of Z, W, and Alpha to calculate residuals
@@ -62,13 +62,13 @@ class FactorModel(eqx.Module):
         #  = sum(mean_z ** 2) + n * tr(var_z)
         # NB: tr(E_q[Z]' M E_prior[Z]) = sum(E_q[Z] * (M E_prior[Z])); saves factor of n
         # guide.weighted_sumsq(params) = tr(M'E[BB']M); can change depending on guide model
-        t1 =    jnp.sum(mean_z**2)
-        t2 =    n_dim * jnp.trace(var_z)
-        t3 =    - 2 * jnp.sum(mean_z * pred_z)
-        t4 =    guide.weighted_sumsq(params)
-        t5 =  -n_dim * z_dim
-        t6 =   - n_dim * logdet(params.var_z)
-        kl_d_ = 0.5 * (t1 + t2 + t3 + t4 + t5)
+        t1 = jnp.sum(mean_z**2)
+        t2 = n_dim * jnp.trace(var_z)
+        t3 = -2 * jnp.sum(mean_z * pred_z)
+        t4 = guide.weighted_sumsq(params)
+        t5 = -n_dim * z_dim
+        t6 = -n_dim * logdet(params.var_z)
+        kl_d_ = 0.5 * (t1 + t2 + t3 + t4 + t5 + t6)
         return kl_d_
 
 
@@ -134,7 +134,7 @@ class _FactorLoopResults(NamedTuple):
 
 def _loop_factors(kdx: int, loop_params: _FactorLoopResults) -> _FactorLoopResults:
     data, W, mean_zz, params = loop_params
-    l_dim, z_dim, p_dim = params.mean_w.shape
+    l_dim, z_dim, _ = params.mean_w.shape
 
     # sufficient stats for inferring downstream w_kl/alpha_kl
     not_kdx = jnp.where(jnp.arange(z_dim) != kdx, size=z_dim - 1)
@@ -166,9 +166,9 @@ class LoadingModel(eqx.Module):
         return self.l_dim, self.z_dim, self.p_dim
 
     def update(self, data: DataMatrix, factors: FactorModel, params: ModelParams) -> ModelParams:
-        l_dim, z_dim, p_dim = self.shape
-        mean_z, mean_zz = factors.moments(params)
-        mean_w, mean_ww = self.moments(params)
+        _, z_dim, _ = self.shape
+        _, mean_zz = factors.moments(params)
+        mean_w, _ = self.moments(params)
 
         # update locals (W, alpha)
         init_loop_param = _FactorLoopResults(data, mean_w, mean_zz, params)
@@ -184,10 +184,7 @@ class LoadingModel(eqx.Module):
         return params._replace(tau_0=u_tau_0)
 
     def moments(self, params: ModelParams) -> LoadingMoments:
-        trace_var = jnp.sum(
-            params.var_w[:, :, jnp.newaxis] * params.alpha + (params.mean_w**2 * params.alpha * (1 - params.alpha)),
-            axis=(-1, 0),
-        )
+        trace_var = jnp.sum(params.var_w[:, :, jnp.newaxis] * params.alpha, axis=(-1, 0))
         mu_w = jnp.sum(params.mean_w * params.alpha, axis=0)
         moments_ = LoadingMoments(
             mean_w=mu_w,

@@ -18,7 +18,7 @@ outer_add = _add_ufunc.outer
 
 
 def logdet(A: Array) -> Array:
-    sign, ldet = jnp.linalg.slogdet(A)
+    _, ldet = jnp.linalg.slogdet(A)
     return ldet
 
 
@@ -71,14 +71,14 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
 
     # check if reach the max_iter, or met the norm criterion every 100 iteration
     def _condition(carry):
-        i, W, Z, old_Z = carry
+        i, _, Z, old_Z = carry
         iter_check = i < max_iter
         tol_check = jnp.linalg.norm(Z - old_Z) > tol
         return iter_check & tol_check
 
     # EM algorithm for PPCA
     def _step(carry):
-        i, W, Z, old_Z = carry
+        i, W, Z, _ = carry
 
         # E step
         W_op = lx.MatrixLinearOperator(W @ W.T, tags=lx.positive_semidefinite_tag)
@@ -115,7 +115,7 @@ def bern_sample(alpha):
     - `efficient_result_matrix` [`Array`]: The sampled matrix.
 
     """
-    l_dim, z_dim, p_dim = alpha.shape
+    l_dim, z_dim, _ = alpha.shape
     # Generate random numbers for each row in the L x K matrix
     # These random numbers are used as indices for selecting features
     random_indices = np.random.rand(l_dim, z_dim)
@@ -148,7 +148,7 @@ def compute_lfsr(params, iters=2000):
     - `lfsr` [`Array`]: The LFSR for each of `L` single effects.
 
     """
-    l_dim, z_dim, p_dim = params.alpha.shape
+    _, _, p_dim = params.alpha.shape
     g_dim, _ = params.mean_beta.shape
     # Reshaping the var_w to (L by K) such that each value in var_w repeats P times
     reshaped_var_w = np.repeat(params.var_w[:, :, np.newaxis], p_dim, axis=2)
@@ -193,9 +193,7 @@ def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
     for k in range(z_dim):
         num_signal = jnp.where(pip[k, :] >= rho)[0].shape[0]
         num_zero = jnp.where(pip[k, :] < rho_prime)[0].shape[0]
-        print(
-            f"Component {k} has {num_signal} features with pip>{rho}; " f"and {num_zero} features with pip<{rho_prime}"
-        )
+        print(f"Component {k} has {num_signal} features with pip>{rho}; and {num_zero} features with pip<{rho_prime}")
         results.append([num_signal, num_zero])
 
     df = pd.DataFrame(results, columns=["num_signal", "num_zero"])

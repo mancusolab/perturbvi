@@ -25,16 +25,13 @@ def _loss(theta: Array, args) -> Array:
 
 class PriorModel(eqx.Module):
     @abstractmethod
-    def predict(self, params: ModelParams) -> Array:
-        ...
+    def predict(self, params: ModelParams) -> Array: ...
 
     @abstractmethod
-    def init_state(self, params: ModelParams) -> ModelParams:
-        ...
+    def init_state(self, params: ModelParams) -> ModelParams: ...
 
     @abstractmethod
-    def update(self, params: ModelParams) -> ModelParams:
-        ...
+    def update(self, params: ModelParams) -> ModelParams: ...
 
 
 class FixedPrior(PriorModel):

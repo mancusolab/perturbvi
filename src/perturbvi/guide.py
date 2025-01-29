@@ -27,16 +27,17 @@ def _get_diag(G: Array) -> Array:
 def _get_diag(G: SparseMatrix) -> Array:
     return jsparse.sparsify(jnp.sum)(G.matrix**2, axis=0).todense()  # type: ignore
 
+
 @dispatch
 def _wgt_sumsq(G: SparseMatrix, vector: Array) -> Array:
     tmp = G.matrix * vector
-    return jsparse.sparsify(jnp.sum)(tmp**2)
+    return jsparse.sparsify(jnp.sum)(tmp**2)  # type: ignore
 
 
 @dispatch
 def _wgt_sumsq(G: Array, vector: Array) -> Array:
     tmp = G * vector
-    return jnp.sum(tmp ** 2)
+    return jnp.sum(tmp**2)
 
 
 _multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
@@ -81,26 +82,21 @@ class GuideModel(eqx.Module):
         return self.guide_data.shape
 
     @abstractmethod
-    def weighted_sumsq(self, params: ModelParams) -> Array:
-        ...
+    def weighted_sumsq(self, params: ModelParams) -> Array: ...
 
     @abstractmethod
-    def predict(self, params: ModelParams) -> Array:
-        ...
+    def predict(self, params: ModelParams) -> Array: ...
 
     @abstractmethod
-    def update(self, params: ModelParams) -> ModelParams:
-        ...
+    def update(self, params: ModelParams) -> ModelParams: ...
 
     @staticmethod
     @abstractmethod
-    def update_hyperparam(params: ModelParams) -> ModelParams:
-        ...
+    def update_hyperparam(params: ModelParams) -> ModelParams: ...
 
     @staticmethod
     @abstractmethod
-    def kl_divergence(params: ModelParams) -> Array:
-        ...
+    def kl_divergence(params: ModelParams) -> Array: ...
 
 
 class SparseGuideModel(GuideModel):
@@ -116,7 +112,7 @@ class SparseGuideModel(GuideModel):
         # however notice that only intercept in non-zero in GtG off-diag
         # ZkG = params.mean_z[:,kdx].T @ G - GtG_diag * params.B[-1,kdx]
         # without intercept
-        # ZkG = params.mean_z.T @ self.guide_data 
+        # ZkG = params.mean_z.T @ self.guide_data
 
         # capture global mean per latent variable to adjust both target/non-target cells for avg effect
         inter = jnp.mean(params.mean_z, axis=0)
@@ -181,4 +177,3 @@ class DenseGuideModel(GuideModel):
     @staticmethod
     def kl_divergence(params: ModelParams) -> Array:
         return jnp.asarray(0.0)
-
