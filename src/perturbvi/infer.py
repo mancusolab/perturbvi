@@ -151,16 +151,13 @@ def _inner_loop(
     # update loadings prior precision via ~Empirical Bayes and update variational params
     params = loadings.update_hyperparam(params)
     params = loadings.update(X, factors, params)
-    elbo_res = compute_elbo(X, guide, factors, loadings, annotation, params)
 
     # update factor parameters
     params = factors.update(X, guide, loadings, params)
-    elbo_res = compute_elbo(X, guide, factors, loadings, annotation, params)
 
     # update beta and p_hat
     params = guide.update_hyperparam(params)
     params = guide.update(params)
-    elbo_res = compute_elbo(X, guide, factors, loadings, annotation, params)
 
     # update precision parameters via MLE
     params = _update_tau(X, factors, loadings, params)
