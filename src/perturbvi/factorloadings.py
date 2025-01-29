@@ -62,14 +62,13 @@ class FactorModel(eqx.Module):
         #  = sum(mean_z ** 2) + n * tr(var_z)
         # NB: tr(E_q[Z]' M E_prior[Z]) = sum(E_q[Z] * (M E_prior[Z])); saves factor of n
         # guide.weighted_sumsq(params) = tr(M'E[BB']M); can change depending on guide model
-        kl_d_ = 0.5 * (
-            jnp.sum(mean_z**2)
-            + n_dim * jnp.trace(var_z)
-            - 2 * jnp.sum(mean_z * pred_z)
-            + guide.weighted_sumsq(params)
-            - n_dim * z_dim
-            - n_dim * logdet(params.var_z)
-        )
+        t1 =    jnp.sum(mean_z**2)
+        t2 =    n_dim * jnp.trace(var_z)
+        t3 =    - 2 * jnp.sum(mean_z * pred_z)
+        t4 =    guide.weighted_sumsq(params)
+        t5 =  -n_dim * z_dim
+        t6 =   - n_dim * logdet(params.var_z)
+        kl_d_ = 0.5 * (t1 + t2 + t3 + t4 + t5)
         return kl_d_
 
 

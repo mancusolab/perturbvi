@@ -10,6 +10,7 @@ import jax.nn as nn
 import jax.numpy as jnp
 import lineax as lx
 
+from jax.scipy.special import logit
 from jaxtyping import Array
 
 from .common import ModelParams
@@ -25,6 +26,17 @@ def _get_diag(G: Array) -> Array:
 @dispatch
 def _get_diag(G: SparseMatrix) -> Array:
     return jsparse.sparsify(jnp.sum)(G.matrix**2, axis=0).todense()  # type: ignore
+
+@dispatch
+def _wgt_sumsq(G: SparseMatrix, vector: Array) -> Array:
+    tmp = G.matrix * vector
+    return jsparse.sparsify(jnp.sum)(tmp**2)
+
+
+@dispatch
+def _wgt_sumsq(G: Array, vector: Array) -> Array:
+    tmp = G * vector
+    return jnp.sum(tmp ** 2)
 
 
 _multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
@@ -97,24 +109,30 @@ class SparseGuideModel(GuideModel):
 
     def weighted_sumsq(self, params: ModelParams) -> Array:
         mean_bb = jnp.sum((params.mean_beta**2 + params.var_beta) * params.p_hat.T, axis=1)
-        return jnp.sum(self.gsq_diag * mean_bb)
+        return _wgt_sumsq(self.guide_data, jnp.sqrt(mean_bb))
 
     def update(self, params: ModelParams) -> ModelParams:
         # compute E[Z'k]G: remove the g-th effect
         # however notice that only intercept in non-zero in GtG off-diag
         # ZkG = params.mean_z[:,kdx].T @ G - GtG_diag * params.B[-1,kdx]
         # without intercept
-        ZkG = params.mean_z.T @ self.guide_data
+        # ZkG = params.mean_z.T @ self.guide_data 
+
+        # capture global mean per latent variable to adjust both target/non-target cells for avg effect
+        inter = jnp.mean(params.mean_z, axis=0)
+
+        # remove predicted mean
+        pred = self.predict(params)
+
+        # add back the g'th effect so we have something to estimate
+        local = (params.mean_beta * params.p_hat.T) * self.gsq_diag[:, jnp.newaxis]
+        ZkG = (params.mean_z - pred - inter).T @ self.guide_data + local.T
 
         # if we don't need to add/subtract we can do it all in one go
         var_beta = jnp.reciprocal(outer_add(params.tau_beta, self.gsq_diag))
         mean_beta = ZkG * var_beta
-        log_bf = (
-            jnp.log(params.p)
-            - jnp.log1p(params.p)
-            + 0.5 * (jnp.log(var_beta) + jnp.log(params.tau_beta[:, jnp.newaxis]) + (mean_beta**2 / var_beta))
-        )
-        p_hat = nn.sigmoid(log_bf)
+        p_hat = nn.sigmoid(logit(params.p) + 0.5 * (mean_beta**2) / var_beta)
+
         return params._replace(
             mean_beta=mean_beta.T,
             var_beta=var_beta.T,
@@ -130,17 +148,19 @@ class SparseGuideModel(GuideModel):
 
     @staticmethod
     def kl_divergence(params: ModelParams) -> Array:
-        # KL for beta
-        # TODO: should be weighted by p_hat ?
-        kl_beta_ = 0.5 * jnp.sum(
+        # KL for each beta
+        kl_beta = 0.5 * (
             (params.mean_beta**2 + params.var_beta) * params.tau_beta
             - 1
             - jnp.log(params.var_beta)
             - jnp.log(params.tau_beta)
         )
+        # sum them up, weighted by posterior prob of having an effect
+        kl_beta = jnp.sum(params.p_hat.T * kl_beta)
+
         # KL for eta selection variables
-        kl_eta_ = kl_discrete(params.p_hat, params.p)
-        return kl_beta_ + kl_eta_
+        kl_eta = kl_discrete(params.p_hat, params.p)
+        return kl_beta + kl_eta
 
 
 class DenseGuideModel(GuideModel):
@@ -161,3 +181,4 @@ class DenseGuideModel(GuideModel):
     @staticmethod
     def kl_divergence(params: ModelParams) -> Array:
         return jnp.asarray(0.0)
+

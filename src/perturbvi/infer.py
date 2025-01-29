@@ -45,7 +45,7 @@ def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, para
     # expectation of log likelihood
     # tr(A @ B) == sum(A * B)
     E_ss = jnp.sum(X * X) - 2 * jnp.trace(mean_w @ (X.T @ mean_z)) + jnp.sum(mean_zz * mean_ww)
-    u_tau = (n_dim * p_dim) / E_ss
+    u_tau = (n_dim / E_ss) * p_dim
 
     return params._replace(tau=u_tau)
 
@@ -90,19 +90,13 @@ def compute_elbo(
     **Arguments:**
 
     - `X` [`Array`]: The observed data, an N by P ndarray
-
     - `guide` [`GuideModel`]: The guide model
-
     - `factors` [`FactorModel`]: The factor model
-
     - `loadings` [`LoadingModel`]: The loading model
-
     - `annotation` [`PriorModel`]: The prior annotation model
-
     - `params` [`ModelParams`]: The dictionary contains all the infered parameters
 
     **Returns:**
-
     - `ELBOResults` [`ELBOResults`]: The object contains all components in ELBO
 
     """
@@ -150,20 +144,27 @@ def _inner_loop(
     annotation: PriorModel,
     params: ModelParams,
 ):
+    import jax
     # update annotation priors if any
     params = annotation.init_state(params)
     params = annotation.update(params)
 
     # update loadings prior precision via ~Empirical Bayes and update variational params
-    params = loadings.update_hyperparam(params)
-    params = loadings.update(X, factors, params)
+    #params = loadings.update_hyperparam(params)
+    #params = loadings.update(X, factors, params)
+    #elbo_res = compute_elbo(X, guide, factors, loadings, annotation, params)
+    #jax.debug.print("ELBO after loadings = {e}", e=elbo_res)
 
     # update factor parameters
     params = factors.update(X, guide, loadings, params)
+    elbo_res = compute_elbo(X, guide, factors, loadings, annotation, params)
+    jax.debug.print("ELBO after factor = {e}", e=elbo_res)
 
     # update beta and p_hat
     params = guide.update_hyperparam(params)
     params = guide.update(params)
+    elbo_res = compute_elbo(X, guide, factors, loadings, annotation, params)
+    jax.debug.print("ELBO after guide model = {e}", e=elbo_res)
 
     # update precision parameters via MLE
     params = _update_tau(X, factors, loadings, params)
