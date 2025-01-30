@@ -127,7 +127,10 @@ class SparseGuideModel(GuideModel):
         # if we don't need to add/subtract we can do it all in one go
         var_beta = jnp.reciprocal(outer_add(params.tau_beta, self.gsq_diag))
         mean_beta = ZkG * var_beta
+
+        eps = 1e-8
         p_hat = nn.sigmoid(logit(params.p) + 0.5 * (mean_beta**2) / var_beta)
+        p_hat = jnp.clip(p_hat, eps, 1 - eps)
 
         return params._replace(
             mean_beta=mean_beta.T,
