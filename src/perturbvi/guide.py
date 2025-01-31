@@ -6,6 +6,7 @@ from plum import dispatch
 import equinox as eqx
 import jax
 import jax.experimental.sparse as jsparse
+import jax.lax as lax
 import jax.nn as nn
 import jax.numpy as jnp
 import lineax as lx
@@ -15,7 +16,34 @@ from jaxtyping import Array
 
 from .common import ModelParams
 from .sparse import SparseMatrix
-from .utils import kl_discrete, outer_add
+from .utils import kl_discrete
+
+
+def _update_sparse_beta(gdx, carry):
+    ZrG, gsq_diag, params = carry
+
+    # (t x k) (k x t)
+    mean_beta_g = params.mean_beta[gdx] * params.p_hat.T[gdx]
+
+    # add gth effect back across all K dim
+    ZrG = ZrG.at[:, gdx].set(ZrG[:, gdx] + gsq_diag[gdx] * mean_beta_g)
+
+    var_beta_g = jnp.reciprocal(params.tau_beta + gsq_diag[gdx])
+    mean_beta_g = ZrG[:, gdx] * var_beta_g
+
+    eps = 1e-8
+    p_hat_g = nn.sigmoid(logit(params.p[gdx]) + 0.5 * (mean_beta_g**2) / var_beta_g)
+    p_hat_g = jnp.clip(p_hat_g, eps, 1 - eps)
+
+    # residualize based on newest estimates for downstream inf
+    ZrG = ZrG.at[:, gdx].set(ZrG[:, gdx] - gsq_diag[gdx] * (mean_beta_g * p_hat_g))
+    params = params._replace(
+        mean_beta=params.mean_beta.at[gdx].set(mean_beta_g),
+        var_beta=params.var_beta.at[gdx].set(var_beta_g),
+        p_hat=params.p_hat.at[:, gdx].set(p_hat_g),
+    )
+
+    return ZrG, gsq_diag, params
 
 
 @dispatch
@@ -114,29 +142,18 @@ class SparseGuideModel(GuideModel):
         # without intercept
         # ZkG = params.mean_z.T @ self.guide_data
 
-        # capture global mean per latent variable to adjust both target/non-target cells for avg effect
+        # Compute residual over Z
+        # first capture global mean per latent variable to adjust both target/non-target cells for avg effect
         inter = jnp.mean(params.mean_z, axis=0)
 
-        # remove predicted mean
+        # also remove predicted mean
         pred = self.predict(params)
+        ZrG = (params.mean_z - pred - inter).T @ self.guide_data
 
-        # add back the g'th effect so we have something to estimate
-        local = (params.mean_beta * params.p_hat.T) * self.gsq_diag[:, jnp.newaxis]
-        ZkG = (params.mean_z - pred - inter).T @ self.guide_data + local.T
+        _, g_dim = params.mean_beta.shape
+        _, _, params = lax.fori_loop(0, g_dim, _update_sparse_beta, (ZrG, self.gsq_diag, params))
 
-        # if we don't need to add/subtract we can do it all in one go
-        var_beta = jnp.reciprocal(outer_add(params.tau_beta, self.gsq_diag))
-        mean_beta = ZkG * var_beta
-
-        eps = 1e-8
-        p_hat = nn.sigmoid(logit(params.p) + 0.5 * (mean_beta**2) / var_beta)
-        p_hat = jnp.clip(p_hat, eps, 1 - eps)
-
-        return params._replace(
-            mean_beta=mean_beta.T,
-            var_beta=var_beta.T,
-            p_hat=p_hat,
-        )
+        return params
 
     @staticmethod
     def update_hyperparam(params: ModelParams) -> ModelParams:
