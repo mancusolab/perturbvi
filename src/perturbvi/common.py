@@ -43,6 +43,18 @@ class ModelParams(NamedTuple):
     mean_w: Array
     var_w: Array
 
+    @property
+    def n_dim(self):
+        return self.mean_z.shape[0]
+
+    @property
+    def z_dim(self):
+        return self.mean_z.shape[1]
+
+    @property
+    def p_dim(self):
+        return self.mean_w.shape[2]
+
     # variational params for Gamma
     alpha: Array
 

@@ -30,7 +30,7 @@ class FactorModel(eqx.Module):
 
     def update(self, data: DataMatrix, guide: GuideModel, loadings: "LoadingModel", params: ModelParams) -> ModelParams:
         mean_w, mean_ww = loadings.moments(params)
-        _, z_dim = self.shape
+        z_dim = params.z_dim
 
         update_var_z = jnp.linalg.inv(params.tau * mean_ww + jnp.identity(z_dim))
         update_mu_z = (params.tau * (data @ mean_w.T) + guide.predict(params)) @ update_var_z
@@ -41,7 +41,7 @@ class FactorModel(eqx.Module):
         )
 
     def moments(self, params: ModelParams) -> FactorMoments:
-        n_dim, _ = self.shape
+        n_dim = params.n_dim
 
         # compute expected residuals
         # use posterior mean of Z, W, and Alpha to calculate residuals
@@ -55,7 +55,7 @@ class FactorModel(eqx.Module):
         return moments_
 
     def kl_divergence(self, guide: GuideModel, params: ModelParams) -> Array:
-        n_dim, z_dim = self.shape
+        n_dim, z_dim = params.n_dim, params.z_dim
         mean_z, var_z = params.mean_z, params.var_z
         pred_z = guide.predict(params)
         # tr(mean_zz) = tr(mean_z' mean_z) + tr(n * var_z)
@@ -166,7 +166,7 @@ class LoadingModel(eqx.Module):
         return self.l_dim, self.z_dim, self.p_dim
 
     def update(self, data: DataMatrix, factors: FactorModel, params: ModelParams) -> ModelParams:
-        _, z_dim, _ = self.shape
+        z_dim = params.z_dim
         _, mean_zz = factors.moments(params)
         mean_w, _ = self.moments(params)
 

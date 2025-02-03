@@ -76,7 +76,6 @@ class ELBOResults(NamedTuple):
         )
 
 
-@eqx.filter_jit
 def compute_elbo(
     X: DataMatrix,
     guide: GuideModel,
@@ -114,9 +113,10 @@ def compute_elbo(
     # calculation tip: tr(A @ A.T) = tr(A.T @ A) = sum(A ** 2); but doubles mem
     # tr(A.T @ A) is inner product of A with itself = vdot(X, X)
     # (X.T @ E[Z] @ E[W]) is p x p (big!); compute (E[W] @ X.T @ E[Z]) (k x k)
+    # jnp.vdot(X, X) is const wrt ELBO but costly to compute; could either compute once and store
+    # or just ignore it
     exp_logl = (-0.5 * params.tau) * (
-        jnp.vdot(X, X)
-        - 2 * jnp.einsum("kp,np,nk->", mean_w, X, mean_z)  # tr(E[W] @ X.T @ E[Z])
+        -2 * jnp.einsum("kp,np,nk->", mean_w, X, mean_z)  # tr(E[W] @ X.T @ E[Z])
         + jnp.einsum("ij,ji->", mean_zz, mean_ww)  # tr(E[Z.T @ Z] @ E[W @ W.T])
     ) + 0.5 * n_dim * p_dim * jnp.log(params.tau)
 
