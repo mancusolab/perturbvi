@@ -137,18 +137,10 @@ class SparseGuideModel(GuideModel):
 
     def update(self, params: ModelParams) -> ModelParams:
         # compute E[Z'k]G: remove the g-th effect
-        # however notice that only intercept in non-zero in GtG off-diag
-        # ZkG = params.mean_z[:,kdx].T @ G - GtG_diag * params.B[-1,kdx]
-        # without intercept
-        # ZkG = params.mean_z.T @ self.guide_data
 
-        # Compute residual over Z
-        # first capture global mean per latent variable to adjust both target/non-target cells for avg effect
-        inter = jnp.mean(params.mean_z, axis=0)
-
-        # also remove predicted mean
+        # remove predicted mean
         pred = self.predict(params)
-        ZrG = (params.mean_z - pred - inter).T @ self.guide_data
+        ZrG = (params.mean_z - pred).T @ self.guide_data
 
         _, g_dim = params.mean_beta.shape
         _, _, params = lax.fori_loop(0, g_dim, _update_sparse_beta, (ZrG, self.gsq_diag, params))

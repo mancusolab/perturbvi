@@ -3,10 +3,11 @@ from typing import get_args, Literal, NamedTuple, Optional, Tuple
 from plum import dispatch
 
 import equinox as eqx
+import jax
 import optax
 import optimistix as optx
 
-from jax import nn, numpy as jnp, random
+from jax import jit, nn, numpy as jnp, random
 from jax.experimental import sparse
 from jaxtyping import Array, ArrayLike
 
@@ -35,8 +36,7 @@ def _is_valid(X: sparse.JAXSparse):
 
 
 def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, params: ModelParams) -> ModelParams:
-    n_dim, _ = params.mean_z.shape
-    _, _, p_dim = params.mean_w.shape
+    n_dim, p_dim = X.shape
 
     # calculate moments of factors and loadings
     mean_z, mean_zz = factor.moments(params)
@@ -44,7 +44,7 @@ def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, para
 
     # expectation of log likelihood
     # tr(A @ B) == sum(A * B)
-    E_ss = jnp.sum(X * X) - 2 * jnp.trace(mean_w @ (X.T @ mean_z)) + jnp.sum(mean_zz * mean_ww)
+    E_ss = params.x_ssq - 2 * jnp.trace(mean_w @ (X.T @ mean_z)) + jnp.sum(mean_zz * mean_ww)
     u_tau = (n_dim / E_ss) * p_dim
 
     return params._replace(tau=u_tau)
@@ -116,6 +116,7 @@ def compute_elbo(
     # jnp.vdot(X, X) is const wrt ELBO but costly to compute; could either compute once and store
     # or just ignore it
     exp_logl = (-0.5 * params.tau) * (
+        params.x_ssq
         -2 * jnp.einsum("kp,np,nk->", mean_w, X, mean_z)  # tr(E[W] @ X.T @ E[Z])
         + jnp.einsum("ij,ji->", mean_zz, mean_ww)  # tr(E[Z.T @ Z] @ E[W @ W.T])
     ) + 0.5 * n_dim * p_dim * jnp.log(params.tau)
@@ -192,6 +193,7 @@ def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelPa
         sorted_pi = params.pi
 
     params = ModelParams(
+        params.x_ssq,
         sorted_mu_z,
         sorted_var_z,
         sorted_mu_w,
@@ -214,6 +216,8 @@ def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelPa
 
 def _init_params(
     rng_key: random.PRNGKey,
+    z_dim: int,
+    l_dim: int,
     X: DataMatrix,
     guide: GuideModel,
     factors: FactorModel,
@@ -253,10 +257,8 @@ def _init_params(
     Raises:
         ValueError: Invalid initialization scheme.
     """
-    l_dim, z_dim, p_dim = loadings.shape
-    tau_0 = jnp.ones((l_dim, z_dim))
-
     n_dim, p_dim = X.shape
+    tau_0 = jnp.ones((l_dim, z_dim))
 
     (
         rng_key,
@@ -273,6 +275,9 @@ def _init_params(
 
     # pull type options for init
     type_options = get_args(_init_type)
+
+    # compute tr(X'X)
+    x_ssq = jnp.sum(X * X)
 
     if init == "pca":
         # run PCA and extract weights and latent
@@ -320,12 +325,13 @@ def _init_params(
     print("Model paramterters initialization finished.")
 
     return ModelParams(
+        x_ssq,
         init_mu_z,
         init_var_z,
         init_mu_w,
         init_var_w,
         init_alpha,
-        tau,
+        jnp.array(tau, dtype=float), # avoid weak-type, which causes recompilation downstream...
         tau_0,
         theta=theta,
         pi=pi,
@@ -496,11 +502,11 @@ def infer(
 
     n, p = X.shape  # type: ignore
 
-    factors = FactorModel(n, z_dim)
-    loadings = LoadingModel(p, z_dim, l_dim)
     # initialize PRNGkey and params
     rng_key = random.PRNGKey(seed)
-    params = _init_params(rng_key, X, guide, factors, loadings, annotation, p_prior, tau, init)
+    factors = FactorModel()
+    loadings = LoadingModel()
+    params = _init_params(rng_key, z_dim, l_dim, X, guide, factors, loadings, annotation, p_prior, tau, init)
 
     #  core loop for inference
     elbo = -5e25
@@ -563,9 +569,8 @@ def compute_pve(params: ModelParams) -> Array:
               explained by each factor (PVE)
     """
 
-    n_dim, z_dim = params.mean_z.shape
+    n_dim = params.n_dim
     W = params.W
-
     z_dim, p_dim = W.shape
 
     sk = jnp.zeros(z_dim)

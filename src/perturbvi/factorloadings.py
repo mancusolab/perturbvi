@@ -21,12 +21,6 @@ class FactorMoments(NamedTuple):
 
 
 class FactorModel(eqx.Module):
-    n: int
-    z_dim: int
-
-    @property
-    def shape(self):
-        return self.n, self.z_dim
 
     def update(self, data: DataMatrix, guide: GuideModel, loadings: "LoadingModel", params: ModelParams) -> ModelParams:
         mean_w, mean_ww = loadings.moments(params)
@@ -151,19 +145,13 @@ def _loop_factors(kdx: int, loop_params: _FactorLoopResults) -> _FactorLoopResul
         l_dim,
         _update_susie_effect,
         init_loop_param,
+        unroll=False,
     )
 
     return loop_params._replace(W=W.at[kdx].set(Wk), params=params)
 
 
 class LoadingModel(eqx.Module):
-    p_dim: int
-    z_dim: int
-    l_dim: int
-
-    @property
-    def shape(self):
-        return self.l_dim, self.z_dim, self.p_dim
 
     def update(self, data: DataMatrix, factors: FactorModel, params: ModelParams) -> ModelParams:
         z_dim = params.z_dim
@@ -172,7 +160,7 @@ class LoadingModel(eqx.Module):
 
         # update locals (W, alpha)
         init_loop_param = _FactorLoopResults(data, mean_w, mean_zz, params)
-        _, _, _, params = lax.fori_loop(0, z_dim, _loop_factors, init_loop_param)
+        _, _, _, params = lax.fori_loop(0, z_dim, _loop_factors, init_loop_param, unroll=False)
         return params
 
     @staticmethod

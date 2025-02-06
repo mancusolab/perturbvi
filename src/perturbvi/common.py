@@ -35,6 +35,9 @@ class ModelParams(NamedTuple):
         p_hat: variational parameters for Eta
     """
 
+    # ssq
+    x_ssq: Array
+
     # variational params for Z
     mean_z: Array
     var_z: Array
