@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 
 import equinox as eqx
+import jax
+import jax.nn as nn
 import jax.scipy.special as jspec
 import lineax as lx
 
@@ -73,7 +75,8 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
     def _condition(carry):
         i, _, Z, old_Z = carry
         iter_check = i < max_iter
-        tol_check = jnp.linalg.norm(Z - old_Z) > tol
+        tol_check = jnp.linalg.norm(Z - old_Z)
+        # scaled_tol_check = tol_check / n_dim > tol
         return iter_check & tol_check
 
     # EM algorithm for PPCA
@@ -134,7 +137,7 @@ def bern_sample(alpha):
     return efficient_result_matrix
 
 
-def compute_lfsr(params, iters=2000):
+def compute_lfsr(key, params, iters=2000):
     """Compute the LFSR (Local False Sign Rate) using the given parameters.
 
     **Arguments:**
@@ -148,33 +151,55 @@ def compute_lfsr(params, iters=2000):
     - `lfsr` [`Array`]: The LFSR for each of `L` single effects.
 
     """
-    _, _, p_dim = params.alpha.shape
+    l_dim, z_dim, p_dim = params.alpha.shape
     g_dim, _ = params.mean_beta.shape
+
     # Reshaping the var_w to (L by K) such that each value in var_w repeats P times
-    reshaped_var_w = np.repeat(params.var_w[:, :, np.newaxis], p_dim, axis=2)
+    reshaped_var_w = jnp.repeat(params.var_w[:, :, jnp.newaxis], p_dim, axis=2)
+
     # Initialize count matrix
     total_pos_zero = jnp.zeros(shape=(g_dim, p_dim))
     total_neg_zero = jnp.zeros(shape=(g_dim, p_dim))
 
-    for i in range(iters):
-        sample_w = np.random.normal(loc=params.mean_w, scale=np.sqrt(reshaped_var_w))
-        sample_alpha = bern_sample(params.alpha)
-        sample_W = np.sum(sample_w * sample_alpha, axis=0)
+    w_shape = params.mean_w.shape
+    b_shape = params.mean_beta.shape
 
-        sample_eta = np.random.binomial(1, params.p_hat.T)
-        sample_beta = np.random.normal(loc=params.mean_beta, scale=np.sqrt(params.var_beta))
+    def _closure(key, p):
+        return rdm.choice(key, a=jnp.arange(p_dim), p=p, replace=False)
+
+    _choice = jax.vmap(_closure, (None, 1))
+
+    def _scan(key, idx):
+        key, a_key = rdm.split(key)
+        # here shape of alpha is (p, L)
+        # we're assuming that shape = (L,)
+        return key, _choice(a_key, params.alpha[:, idx, :].T).T
+
+    def _inner(idx: int, carry):
+        key, tpz, tnz = carry
+        key, w_key, a_key, e_key, b_key = rdm.split(key, 5)
+
+        sample_w = params.mean_w + jnp.sqrt(reshaped_var_w) * rdm.normal(w_key, shape=w_shape)
+        _, sample_alpha = lax.scan(_scan, xs=jnp.arange(z_dim), init=a_key)
+        sample_W = jnp.sum(sample_w * nn.one_hot(sample_alpha.T, p_dim), axis=0)
+
+        sample_eta = rdm.binomial(e_key, 1, params.p_hat.T)
+        sample_beta = params.mean_beta + jnp.sqrt(params.var_beta) * rdm.normal(b_key, shape=b_shape)
         sample_B = sample_beta * sample_eta
 
         sample_oe = sample_B @ sample_W
 
         ind_pos = (sample_oe >= 0).astype(int)
         ind_neg = (sample_oe <= 0).astype(int)
-        total_pos_zero = total_pos_zero + ind_pos
-        total_neg_zero = total_neg_zero + ind_neg
-        if (i + 1) % 100 == 0:
-            print(f"{i - 99}-{i + 1} iters complete")
+        tpz = tpz + ind_pos
+        tnz = tnz + ind_neg
+        return key, tpz, tnz
 
-    lfsr = np.minimum(total_pos_zero, total_neg_zero) / iters
+    init = (key, total_pos_zero, total_neg_zero)
+
+    _, total_pos_zero, total_neg_zero = lax.fori_loop(0, iters, _inner, init)
+    lfsr = jnp.minimum(total_pos_zero, total_neg_zero) / iters
+
     return lfsr
 
 
