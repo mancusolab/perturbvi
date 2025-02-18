@@ -1,4 +1,5 @@
 from functools import partial
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -151,6 +152,8 @@ def compute_lfsr(key, params, iters=2000):
     - `lfsr` [`Array`]: The LFSR for each of `L` single effects.
 
     """
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"Start computing LFSR at {current_time}")
     l_dim, z_dim, p_dim = params.alpha.shape
     g_dim, _ = params.mean_beta.shape
 
@@ -177,6 +180,10 @@ def compute_lfsr(key, params, iters=2000):
 
     def _inner(idx: int, carry):
         key, tpz, tnz = carry
+        
+        # Print progress more frequently and use host_callback
+        jax.debug.callback(lambda idx: print(f"Computing iteration {idx}/{iters}"), idx)
+        
         key, w_key, a_key, e_key, b_key = rdm.split(key, 5)
 
         sample_w = params.mean_w + jnp.sqrt(reshaped_var_w) * rdm.normal(w_key, shape=w_shape)
@@ -199,6 +206,9 @@ def compute_lfsr(key, params, iters=2000):
 
     _, total_pos_zero, total_neg_zero = lax.fori_loop(0, iters, _inner, init)
     lfsr = jnp.minimum(total_pos_zero, total_neg_zero) / iters
+
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"Finished computing LFSR at {current_time}")
 
     return lfsr
 
