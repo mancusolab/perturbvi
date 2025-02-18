@@ -1,5 +1,6 @@
 from functools import partial
 from datetime import datetime
+from time import time
 
 import numpy as np
 import pandas as pd
@@ -138,78 +139,110 @@ def bern_sample(alpha):
     return efficient_result_matrix
 
 
+def bern_sample_jax(key, alpha):
+    """JAX version of bern_sample function.
+    
+    Arguments:
+        key: JAX random key
+        alpha: probability matrix of shape (l_dim, z_dim, p_dim)
+    """
+    random_values = rdm.uniform(key, shape=alpha.shape[:-1])
+    cumsum = jnp.cumsum(alpha, axis=-1)
+    return jnp.eye(alpha.shape[-1])[jnp.argmax(cumsum > random_values[..., None], axis=-1)]
+
+
+@partial(jit, static_argnums=(2,))
+def _compute_lfsr_step(key, params, iters):
+    """Jitted inner loop of LFSR computation"""
+    l_dim, z_dim, p_dim = params.alpha.shape
+    g_dim, _ = params.mean_beta.shape
+    reshaped_var_w = jnp.repeat(params.var_w[:, :, jnp.newaxis], p_dim, axis=2)
+    
+    def _inner_loop(carry, i):  # Modified to accept iteration index
+        key, total_pos, total_neg = carry
+        
+        # Split keys for different random operations
+        key, w_key, a_key, e_key, b_key = rdm.split(key, 5)
+        
+        # Sample W
+        sample_w = params.mean_w + jnp.sqrt(reshaped_var_w) * rdm.normal(w_key, shape=params.mean_w.shape)
+        sample_alpha = bern_sample_jax(a_key, params.alpha)
+        sample_W = jnp.sum(sample_w * sample_alpha, axis=0)
+        
+        # Sample B
+        sample_eta = rdm.bernoulli(e_key, params.p_hat.T)
+        sample_beta = params.mean_beta + jnp.sqrt(params.var_beta) * rdm.normal(b_key, shape=params.mean_beta.shape)
+        sample_B = sample_beta * sample_eta
+        
+        # Compute outer product
+        sample_oe = sample_B @ sample_W
+        ind_pos = (sample_oe >= 0)
+        ind_neg = (sample_oe <= 0)
+    
+        return (key, total_pos + ind_pos, total_neg + ind_neg), None
+    
+    # Initialize
+    total_pos_zero = jnp.zeros((g_dim, p_dim))
+    total_neg_zero = jnp.zeros((g_dim, p_dim))
+    init_carry = (key, total_pos_zero, total_neg_zero)
+    
+    # Run the loop
+    (_, total_pos_zero, total_neg_zero), _ = lax.scan(_inner_loop, init_carry, jnp.arange(iters))
+    
+    return total_pos_zero, total_neg_zero
+
+
 def compute_lfsr(key, params, iters=2000):
     """Compute the LFSR (Local False Sign Rate) using the given parameters.
-
-    **Arguments:**
-
-    - `params` [`ModelParams`]: The parameters of the model.
-
-    - `iters` [`int`]: The number of iterations to run the algorithm. Default is 2000.
-
-    **Returns:**
-
-    - `lfsr` [`Array`]: The LFSR for each of `L` single effects.
-
+    
+    Arguments:
+        key: JAX random key
+        params: The parameters of the model
+        iters: Number of iterations (default=2000)
     """
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"Start computing LFSR at {current_time}")
-    l_dim, z_dim, p_dim = params.alpha.shape
-    g_dim, _ = params.mean_beta.shape
-
-    # Reshaping the var_w to (L by K) such that each value in var_w repeats P times
-    reshaped_var_w = jnp.repeat(params.var_w[:, :, jnp.newaxis], p_dim, axis=2)
-
-    # Initialize count matrix
-    total_pos_zero = jnp.zeros(shape=(g_dim, p_dim))
-    total_neg_zero = jnp.zeros(shape=(g_dim, p_dim))
-
-    w_shape = params.mean_w.shape
-    b_shape = params.mean_beta.shape
-
-    def _closure(key, p):
-        return rdm.choice(key, a=jnp.arange(p_dim), p=p, replace=False)
-
-    _choice = jax.vmap(_closure, (None, 1))
-
-    def _scan(key, idx):
-        key, a_key = rdm.split(key)
-        # here shape of alpha is (p, L)
-        # we're assuming that shape = (L,)
-        return key, _choice(a_key, params.alpha[:, idx, :].T).T
-
-    def _inner(idx: int, carry):
-        key, tpz, tnz = carry
-        
-        # Print progress more frequently and use host_callback
-        jax.debug.callback(lambda idx: print(f"Computing iteration {idx}/{iters}"), idx)
-        
-        key, w_key, a_key, e_key, b_key = rdm.split(key, 5)
-
-        sample_w = params.mean_w + jnp.sqrt(reshaped_var_w) * rdm.normal(w_key, shape=w_shape)
-        _, sample_alpha = lax.scan(_scan, xs=jnp.arange(z_dim), init=a_key)
-        sample_W = jnp.sum(sample_w * nn.one_hot(sample_alpha.T, p_dim), axis=0)
-
-        sample_eta = rdm.binomial(e_key, 1, params.p_hat.T)
-        sample_beta = params.mean_beta + jnp.sqrt(params.var_beta) * rdm.normal(b_key, shape=b_shape)
-        sample_B = sample_beta * sample_eta
-
-        sample_oe = sample_B @ sample_W
-
-        ind_pos = (sample_oe >= 0).astype(int)
-        ind_neg = (sample_oe <= 0).astype(int)
-        tpz = tpz + ind_pos
-        tnz = tnz + ind_neg
-        return key, tpz, tnz
-
-    init = (key, total_pos_zero, total_neg_zero)
-
-    _, total_pos_zero, total_neg_zero = lax.fori_loop(0, iters, _inner, init)
-    lfsr = jnp.minimum(total_pos_zero, total_neg_zero) / iters
-
+    
+    # Split computation into chunks to show progress
+    chunk_size = 100
+    num_chunks = iters // chunk_size
+    remaining = iters % chunk_size
+    
+    total_pos = 0
+    total_neg = 0
+    
+    for i in range(num_chunks):
+        pos_chunk = 0
+        neg_chunk = 0
+        # Process each iteration within the chunk individually
+        for j in range(chunk_size):
+            iter_key = rdm.fold_in(key, i * chunk_size + j)  # Unique key for each iteration
+            pos, neg = _compute_lfsr_step(iter_key, params, 1)  # Process single iteration
+            pos_chunk += pos
+            neg_chunk += neg
+        total_pos += pos_chunk
+        total_neg += neg_chunk
+        print(f"Completed {(i+1)*chunk_size}/{iters} iterations")
+    
+    # Handle remaining iterations if any
+    if remaining > 0:
+        pos_rem = 0
+        neg_rem = 0
+        for j in range(remaining):
+            iter_key = rdm.fold_in(key, num_chunks * chunk_size + j)
+            pos, neg = _compute_lfsr_step(iter_key, params, 1)
+            pos_rem += pos
+            neg_rem += neg
+        total_pos += pos_rem
+        total_neg += neg_rem
+        print(f"Completed {iters}/{iters} iterations")
+    
+    # Compute final LFSR
+    lfsr = jnp.minimum(total_pos, total_neg) / iters
+    
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"Finished computing LFSR at {current_time}")
-
+    
     return lfsr
 
 
