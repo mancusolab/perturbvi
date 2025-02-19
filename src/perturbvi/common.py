@@ -35,6 +35,9 @@ class ModelParams(NamedTuple):
         p_hat: variational parameters for Eta
     """
 
+    # ssq
+    x_ssq: Array
+
     # variational params for Z
     mean_z: Array
     var_z: Array
@@ -42,6 +45,18 @@ class ModelParams(NamedTuple):
     # variational params for W given Gamma
     mean_w: Array
     var_w: Array
+
+    @property
+    def n_dim(self):
+        return self.mean_z.shape[0]
+
+    @property
+    def z_dim(self):
+        return self.mean_z.shape[1]
+
+    @property
+    def p_dim(self):
+        return self.mean_w.shape[2]
 
     # variational params for Gamma
     alpha: Array

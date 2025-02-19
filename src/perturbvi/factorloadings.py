@@ -21,16 +21,10 @@ class FactorMoments(NamedTuple):
 
 
 class FactorModel(eqx.Module):
-    n: int
-    z_dim: int
-
-    @property
-    def shape(self):
-        return self.n, self.z_dim
 
     def update(self, data: DataMatrix, guide: GuideModel, loadings: "LoadingModel", params: ModelParams) -> ModelParams:
         mean_w, mean_ww = loadings.moments(params)
-        n_dim, z_dim = self.shape
+        z_dim = params.z_dim
 
         update_var_z = jnp.linalg.inv(params.tau * mean_ww + jnp.identity(z_dim))
         update_mu_z = (params.tau * (data @ mean_w.T) + guide.predict(params)) @ update_var_z
@@ -41,7 +35,7 @@ class FactorModel(eqx.Module):
         )
 
     def moments(self, params: ModelParams) -> FactorMoments:
-        n_dim, z_dim = self.shape
+        n_dim = params.n_dim
 
         # compute expected residuals
         # use posterior mean of Z, W, and Alpha to calculate residuals
@@ -55,21 +49,20 @@ class FactorModel(eqx.Module):
         return moments_
 
     def kl_divergence(self, guide: GuideModel, params: ModelParams) -> Array:
-        n_dim, z_dim = self.shape
+        n_dim, z_dim = params.n_dim, params.z_dim
         mean_z, var_z = params.mean_z, params.var_z
         pred_z = guide.predict(params)
         # tr(mean_zz) = tr(mean_z' mean_z) + tr(n * var_z)
         #  = sum(mean_z ** 2) + n * tr(var_z)
         # NB: tr(E_q[Z]' M E_prior[Z]) = sum(E_q[Z] * (M E_prior[Z])); saves factor of n
         # guide.weighted_sumsq(params) = tr(M'E[BB']M); can change depending on guide model
-        kl_d_ = 0.5 * (
-            jnp.sum(mean_z**2)
-            + n_dim * jnp.trace(var_z)
-            - 2 * jnp.sum(mean_z * pred_z)
-            + guide.weighted_sumsq(params)
-            - n_dim * z_dim
-            - n_dim * logdet(params.var_z)
-        )
+        t1 = jnp.sum(mean_z**2)
+        t2 = n_dim * jnp.trace(var_z)
+        t3 = -2 * jnp.sum(mean_z * pred_z)
+        t4 = guide.weighted_sumsq(params)
+        t5 = -n_dim * z_dim
+        t6 = -n_dim * logdet(params.var_z)
+        kl_d_ = 0.5 * (t1 + t2 + t3 + t4 + t5 + t6)
         return kl_d_
 
 
@@ -135,7 +128,7 @@ class _FactorLoopResults(NamedTuple):
 
 def _loop_factors(kdx: int, loop_params: _FactorLoopResults) -> _FactorLoopResults:
     data, W, mean_zz, params = loop_params
-    l_dim, z_dim, p_dim = params.mean_w.shape
+    l_dim, z_dim, _ = params.mean_w.shape
 
     # sufficient stats for inferring downstream w_kl/alpha_kl
     not_kdx = jnp.where(jnp.arange(z_dim) != kdx, size=z_dim - 1)
@@ -152,28 +145,22 @@ def _loop_factors(kdx: int, loop_params: _FactorLoopResults) -> _FactorLoopResul
         l_dim,
         _update_susie_effect,
         init_loop_param,
+        unroll=False,
     )
 
     return loop_params._replace(W=W.at[kdx].set(Wk), params=params)
 
 
 class LoadingModel(eqx.Module):
-    p_dim: int
-    z_dim: int
-    l_dim: int
-
-    @property
-    def shape(self):
-        return self.l_dim, self.z_dim, self.p_dim
 
     def update(self, data: DataMatrix, factors: FactorModel, params: ModelParams) -> ModelParams:
-        l_dim, z_dim, p_dim = self.shape
-        mean_z, mean_zz = factors.moments(params)
-        mean_w, mean_ww = self.moments(params)
+        z_dim = params.z_dim
+        _, mean_zz = factors.moments(params)
+        mean_w, _ = self.moments(params)
 
         # update locals (W, alpha)
         init_loop_param = _FactorLoopResults(data, mean_w, mean_zz, params)
-        _, _, _, params = lax.fori_loop(0, z_dim, _loop_factors, init_loop_param)
+        _, _, _, params = lax.fori_loop(0, z_dim, _loop_factors, init_loop_param, unroll=False)
         return params
 
     @staticmethod
@@ -185,10 +172,7 @@ class LoadingModel(eqx.Module):
         return params._replace(tau_0=u_tau_0)
 
     def moments(self, params: ModelParams) -> LoadingMoments:
-        trace_var = jnp.sum(
-            params.var_w[:, :, jnp.newaxis] * params.alpha + (params.mean_w**2 * params.alpha * (1 - params.alpha)),
-            axis=(-1, 0),
-        )
+        trace_var = jnp.sum(params.var_w[:, :, jnp.newaxis] * params.alpha, axis=(-1, 0))
         mu_w = jnp.sum(params.mean_w * params.alpha, axis=0)
         moments_ = LoadingMoments(
             mean_w=mu_w,

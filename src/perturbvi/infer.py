@@ -3,10 +3,11 @@ from typing import get_args, Literal, NamedTuple, Optional, Tuple
 from plum import dispatch
 
 import equinox as eqx
+import jax
 import optax
 import optimistix as optx
 
-from jax import nn, numpy as jnp, random
+from jax import jit, nn, numpy as jnp, random
 from jax.experimental import sparse
 from jaxtyping import Array, ArrayLike
 
@@ -35,8 +36,7 @@ def _is_valid(X: sparse.JAXSparse):
 
 
 def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, params: ModelParams) -> ModelParams:
-    n_dim, z_dim = params.mean_z.shape
-    l_dim, z_dim, p_dim = params.mean_w.shape
+    n_dim, p_dim = X.shape
 
     # calculate moments of factors and loadings
     mean_z, mean_zz = factor.moments(params)
@@ -44,8 +44,8 @@ def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, para
 
     # expectation of log likelihood
     # tr(A @ B) == sum(A * B)
-    E_ss = jnp.sum(X * X) - 2 * jnp.trace(mean_w @ (X.T @ mean_z)) + jnp.sum(mean_zz * mean_ww)
-    u_tau = (n_dim * p_dim) / E_ss
+    E_ss = params.x_ssq - 2 * jnp.trace(mean_w @ (X.T @ mean_z)) + jnp.sum(mean_zz * mean_ww)
+    u_tau = (n_dim / E_ss) * p_dim
 
     return params._replace(tau=u_tau)
 
@@ -59,7 +59,7 @@ class ELBOResults(NamedTuple):
         kl_factors: -KL divergence of Z
         kl_loadings: -KL divergence of W
         kl_guide: -KL divergence of B
-    
+
     """
 
     elbo: Array
@@ -76,7 +76,6 @@ class ELBOResults(NamedTuple):
         )
 
 
-@eqx.filter_jit
 def compute_elbo(
     X: DataMatrix,
     guide: GuideModel,
@@ -90,24 +89,18 @@ def compute_elbo(
     **Arguments:**
 
     - `X` [`Array`]: The observed data, an N by P ndarray
-
     - `guide` [`GuideModel`]: The guide model
-
     - `factors` [`FactorModel`]: The factor model
-
     - `loadings` [`LoadingModel`]: The loading model
-
     - `annotation` [`PriorModel`]: The prior annotation model
-
     - `params` [`ModelParams`]: The dictionary contains all the infered parameters
 
     **Returns:**
-
     - `ELBOResults` [`ELBOResults`]: The object contains all components in ELBO
 
     """
-    n_dim, z_dim = params.mean_z.shape
-    l_dim, z_dim, p_dim = params.mean_w.shape
+    n_dim, _ = params.mean_z.shape
+    _, _, p_dim = params.mean_w.shape
 
     # calculate second moment of Z along k, (k x k) matrix
     # E[Z'Z] = V_k[Z] * tr(I_n) + E[Z]'E[Z] = V_k[Z] * n + E[Z]'E[Z]
@@ -117,11 +110,14 @@ def compute_elbo(
     mean_w, mean_ww = loadings.moments(params)
 
     # expectation of log likelihood
-    # calculation tip: tr(A @ A.T) = tr(A.T @ A) = sum(A ** 2)
+    # calculation tip: tr(A @ A.T) = tr(A.T @ A) = sum(A ** 2); but doubles mem
+    # tr(A.T @ A) is inner product of A with itself = vdot(X, X)
     # (X.T @ E[Z] @ E[W]) is p x p (big!); compute (E[W] @ X.T @ E[Z]) (k x k)
+    # jnp.vdot(X, X) is const wrt ELBO but costly to compute; could either compute once and store
+    # or just ignore it
     exp_logl = (-0.5 * params.tau) * (
-        jnp.sum(X**2)
-        - 2 * jnp.einsum("kp,np,nk->", mean_w, X, mean_z)  # tr(E[W] @ X.T @ E[Z])
+        params.x_ssq
+        -2 * jnp.einsum("kp,np,nk->", mean_w, X, mean_z)  # tr(E[W] @ X.T @ E[Z])
         + jnp.einsum("ij,ji->", mean_zz, mean_ww)  # tr(E[Z.T @ Z] @ E[W @ W.T])
     ) + 0.5 * n_dim * p_dim * jnp.log(params.tau)
 
@@ -197,6 +193,7 @@ def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelPa
         sorted_pi = params.pi
 
     params = ModelParams(
+        params.x_ssq,
         sorted_mu_z,
         sorted_var_z,
         sorted_mu_w,
@@ -219,6 +216,8 @@ def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelPa
 
 def _init_params(
     rng_key: random.PRNGKey,
+    z_dim: int,
+    l_dim: int,
     X: DataMatrix,
     guide: GuideModel,
     factors: FactorModel,
@@ -258,10 +257,8 @@ def _init_params(
     Raises:
         ValueError: Invalid initialization scheme.
     """
-    l_dim, z_dim, p_dim = loadings.shape
-    tau_0 = jnp.ones((l_dim, z_dim))
-
     n_dim, p_dim = X.shape
+    tau_0 = jnp.ones((l_dim, z_dim))
 
     (
         rng_key,
@@ -273,12 +270,14 @@ def _init_params(
         alpha_key,
         beta_key,
         var_beta_key,
-        p_key,
         theta_key,
-    ) = random.split(rng_key, 11)
+    ) = random.split(rng_key, 10)
 
     # pull type options for init
     type_options = get_args(_init_type)
+
+    # compute tr(X'X)
+    x_ssq = jnp.sum(X * X)
 
     if init == "pca":
         # run PCA and extract weights and latent
@@ -326,12 +325,13 @@ def _init_params(
     print("Model paramterters initialization finished.")
 
     return ModelParams(
+        x_ssq,
         init_mu_z,
         init_var_z,
         init_mu_w,
         init_var_w,
         init_alpha,
-        tau,
+        jnp.array(tau, dtype=float), # avoid weak-type, which causes recompilation downstream...
         tau_0,
         theta=theta,
         pi=pi,
@@ -447,7 +447,8 @@ def infer(
     -`A` [`Array`]: Annotation matrix to use in parameterized-prior mode. If not `None`, leading dimension
         should match the feature dimension of X.
 
-    -`p_prior` [`float`]: Prior probability for each perturbation to have a non-zero effect to predict latent factor. (default = 0.5)
+    -`p_prior` [`float`]: Prior probability for each perturbation to have a non-zero effect to predict latent factor.
+        (default = 0.5)
 
     -`tau` [`float`]: initial value of residual precision (default = 1)
 
@@ -469,7 +470,7 @@ def infer(
 
     **Returns:**
 
-    -`InferResults`: The dictionary contain all the infered parameters.
+    An [`InferResults`][] object  contain all the infered parameters.
     """
 
     # sanity check arguments
@@ -501,11 +502,11 @@ def infer(
 
     n, p = X.shape  # type: ignore
 
-    factors = FactorModel(n, z_dim)
-    loadings = LoadingModel(p, z_dim, l_dim)
     # initialize PRNGkey and params
     rng_key = random.PRNGKey(seed)
-    params = _init_params(rng_key, X, guide, factors, loadings, annotation, p_prior, tau, init)
+    factors = FactorModel()
+    loadings = LoadingModel()
+    params = _init_params(rng_key, z_dim, l_dim, X, guide, factors, loadings, annotation, p_prior, tau, init)
 
     #  core loop for inference
     elbo = -5e25
@@ -545,7 +546,7 @@ def compute_pip(params: ModelParams) -> Array:
 
     **Returns:**
 
-    -`PIP` [`Array`]: Array of posterior inclusion probabilities (PIPs) for each of `K x P` factor, 
+    -`PIP` [`Array`]: Array of posterior inclusion probabilities (PIPs) for each of `K x P` factor,
               feature combinations
 
     """
@@ -568,9 +569,8 @@ def compute_pve(params: ModelParams) -> Array:
               explained by each factor (PVE)
     """
 
-    n_dim, z_dim = params.mean_z.shape
+    n_dim = params.n_dim
     W = params.W
-
     z_dim, p_dim = W.shape
 
     sk = jnp.zeros(z_dim)
