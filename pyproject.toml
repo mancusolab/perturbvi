@@ -32,8 +32,13 @@ dependencies = [
     "lineax",
     "optimistix",
     "optax",
-    "plum-dispatch"
+    "plum-dispatch",
+    "pandas",
+    "numpy"
 ]
+
+[project.scripts]
+perturbvi = "perturbvi.cli:run_cli"
 
 [project.urls]
 Documentation = "https://mancusolab.github.io/perturbvi"
