@@ -4,6 +4,7 @@ src/perturbvi/_version.py
 test?.py
 
 *.cache
+uv.lock
 
 # Temporary and binary files
 foo.py
