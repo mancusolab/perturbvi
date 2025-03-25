@@ -1,13 +1,10 @@
-from functools import partial
 from datetime import datetime
-from time import time
+from functools import partial
 
 import numpy as np
 import pandas as pd
 
 import equinox as eqx
-import jax
-import jax.nn as nn
 import jax.scipy.special as jspec
 import lineax as lx
 
@@ -77,7 +74,7 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
     def _condition(carry):
         i, _, Z, old_Z = carry
         iter_check = i < max_iter
-        tol_check = jnp.linalg.norm(Z - old_Z)
+        tol_check = jnp.linalg.norm(Z - old_Z) > tol
         # scaled_tol_check = tol_check / n_dim > tol
         return iter_check & tol_check
 
@@ -141,7 +138,7 @@ def bern_sample(alpha):
 
 def bern_sample_jax(key, alpha):
     """JAX version of bern_sample function.
-    
+
     Arguments:
         key: JAX random key
         alpha: probability matrix of shape (l_dim, z_dim, p_dim)
@@ -157,44 +154,44 @@ def _compute_lfsr_step(key, params, iters):
     l_dim, z_dim, p_dim = params.alpha.shape
     g_dim, _ = params.mean_beta.shape
     reshaped_var_w = jnp.repeat(params.var_w[:, :, jnp.newaxis], p_dim, axis=2)
-    
+
     def _inner_loop(carry, i):  # Modified to accept iteration index
         key, total_pos, total_neg = carry
-        
+
         # Split keys for different random operations
         key, w_key, a_key, e_key, b_key = rdm.split(key, 5)
-        
+
         # Sample W
         sample_w = params.mean_w + jnp.sqrt(reshaped_var_w) * rdm.normal(w_key, shape=params.mean_w.shape)
         sample_alpha = bern_sample_jax(a_key, params.alpha)
         sample_W = jnp.sum(sample_w * sample_alpha, axis=0)
-        
+
         # Sample B
         sample_eta = rdm.bernoulli(e_key, params.p_hat.T)
         sample_beta = params.mean_beta + jnp.sqrt(params.var_beta) * rdm.normal(b_key, shape=params.mean_beta.shape)
         sample_B = sample_beta * sample_eta
-        
+
         # Compute outer product
         sample_oe = sample_B @ sample_W
-        ind_pos = (sample_oe >= 0)
-        ind_neg = (sample_oe <= 0)
-    
+        ind_pos = sample_oe >= 0
+        ind_neg = sample_oe <= 0
+
         return (key, total_pos + ind_pos, total_neg + ind_neg), None
-    
+
     # Initialize
     total_pos_zero = jnp.zeros((g_dim, p_dim))
     total_neg_zero = jnp.zeros((g_dim, p_dim))
     init_carry = (key, total_pos_zero, total_neg_zero)
-    
+
     # Run the loop
     (_, total_pos_zero, total_neg_zero), _ = lax.scan(_inner_loop, init_carry, jnp.arange(iters))
-    
+
     return total_pos_zero, total_neg_zero
 
 
 def compute_lfsr(key, params, iters=2000):
     """Compute the LFSR (Local False Sign Rate) using the given parameters.
-    
+
     Arguments:
         key: JAX random key
         params: The parameters of the model
@@ -202,15 +199,15 @@ def compute_lfsr(key, params, iters=2000):
     """
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"Start computing LFSR at {current_time}")
-    
+
     # Split computation into chunks to show progress
     chunk_size = 100
     num_chunks = iters // chunk_size
     remaining = iters % chunk_size
-    
+
     total_pos = 0
     total_neg = 0
-    
+
     for i in range(num_chunks):
         pos_chunk = 0
         neg_chunk = 0
@@ -222,8 +219,8 @@ def compute_lfsr(key, params, iters=2000):
             neg_chunk += neg
         total_pos += pos_chunk
         total_neg += neg_chunk
-        print(f"Completed {(i+1)*chunk_size}/{iters} iterations")
-    
+        print(f"Completed {(i + 1) * chunk_size}/{iters} iterations")
+
     # Handle remaining iterations if any
     if remaining > 0:
         pos_rem = 0
@@ -236,13 +233,13 @@ def compute_lfsr(key, params, iters=2000):
         total_pos += pos_rem
         total_neg += neg_rem
         print(f"Completed {iters}/{iters} iterations")
-    
+
     # Compute final LFSR
     lfsr = jnp.minimum(total_pos, total_neg) / iters
-    
+
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"Finished computing LFSR at {current_time}")
-    
+
     return lfsr
 
 

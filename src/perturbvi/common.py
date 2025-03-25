@@ -10,6 +10,32 @@ from .sparse import CenteredSparseMatrix, SparseMatrix
 DataMatrix = Array | SparseMatrix | CenteredSparseMatrix
 FloatOrArray = Union[float, ArrayLike]
 
+class ELBOResults(NamedTuple):
+
+    """Define the class of all components in ELBO.
+
+    Attributes:
+        elbo: the value of ELBO
+        E_ll: Expectation of log-likelihood
+        negKL_z: -KL divergence of Z
+        negKL_w: -KL divergence of W
+        negKL_gamma: -KL divergence of gamma
+
+    """
+
+    elbo: FloatOrArray
+    E_ll: FloatOrArray
+    negKL_z: FloatOrArray
+    negKL_w: FloatOrArray
+    negKL_gamma: FloatOrArray
+
+    def __str__(self):
+        return (
+            f"ELBO = {self.elbo:.3f} | E[logl] = {self.E_ll:.3f} | "
+            f"-KL[Z] = {self.negKL_z:.3f} | -KL[W] = {self.negKL_w:.3f} | "
+            f"-KL[G] = {self.negKL_gamma:.3f}"
+        )
+
 
 class ModelParams(NamedTuple):
     """
@@ -86,3 +112,24 @@ class ModelParams(NamedTuple):
     @property
     def W(self) -> Array:
         return jnp.sum(self.mean_w * self.alpha, axis=0)
+
+class SuSiEPCAResults(NamedTuple):
+    """Define the results object returned by function :py:obj:`susie_pca`.
+
+    Attributes:
+        params: the dictionary contain all the infered parameters
+        elbo: the value of ELBO
+        pve: the ndarray of percent of variance explained
+        pip: the ndarray of posterior inclusion probabilities
+        W: the posterior mean parameter for loadings
+
+    """
+
+    params: ModelParams
+    elbo: ELBOResults
+    pve: Array
+    pip: Array
+
+    @property
+    def W(self) -> Array:
+        return self.params.W
