@@ -93,7 +93,7 @@ def compute_elbo(
     - `factors` [`FactorModel`]: The factor model
     - `loadings` [`LoadingModel`]: The loading model
     - `annotation` [`PriorModel`]: The prior annotation model
-    - `params` [`ModelParams`]: The dictionary contains all the infered parameters
+    - `params` [`ModelParams`]: The dictionary contains all the inferred parameters
 
     **Returns:**
     - `ELBOResults` [`ELBOResults`]: The object contains all components in ELBO
@@ -470,7 +470,7 @@ def infer(
 
     **Returns:**
 
-    An [`InferResults`][] object  contain all the infered parameters.
+    An [`InferResults`][] object  contain all the inferred parameters.
     """
 
     # sanity check arguments
