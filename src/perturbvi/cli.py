@@ -1,128 +1,117 @@
-#!/usr/bin/env python3
+# #!/usr/bin/env python3
 import argparse as ap
+
+import pandas as pd
+import numpy as np
+
 import logging
+import pickle
+import csv
 import sys
+import os
 
-import jax
+from jax import config
+import jax.numpy as jnp
+from jax.experimental import sparse
+
 from perturbvi.log import get_logger
-from perturbvi.sim import generate_sim
-from perturbvi.utils import compute_lfsr
-from perturbvi.infer import infer
+from perturbvi import infer
 
-def main(args):
-    argp = ap.ArgumentParser(description="infer regulatory modules from CRISPR perturbation data")
-    subparsers = argp.add_subparsers(dest="command", required=True)
 
-    # generate_sim
-    arg_sim = subparsers.add_parser("sim", help="generate simulated data")
-    arg_sim.add_argument("--seed", type=int, required=True, help="seed")
-    arg_sim.add_argument("--l_dim", type=int, required=True, help="num of single effects in each factor")
-    arg_sim.add_argument("--n_dim", type=int, required=True, help="num of samples")
-    arg_sim.add_argument("--p_dim", type=int, required=True, help="num of features")
-    arg_sim.add_argument("--z_dim", type=int, required=True, help="num of latent dimensions")
-    arg_sim.add_argument("--g_dim", type=int, required=True, help="perturbation dimensions")
-    arg_sim.add_argument("--b_sparsity", type=float, default=0.2, help="sparsity of perturbation effects")
-    arg_sim.add_argument("--effect_size", type=float, default=1.0, help="effect size of features")
+def _main(args):
+    argp = ap.ArgumentParser(description="PerturbVI: infer regulatory modules from CRISPR perturbation data")
+    subp = argp.add_subparsers(
+        dest="command",
+        help="Subcommands: infer to perform regulatory module inference using SuShiE PCA",
+        required=True,
+    )
 
-    # compute_lfsr
-    arg_lfsr = subparsers.add_parser("lfsr", help="compute the LFSR")
-    arg_lfsr.add_argument("--seed", type=int, required=True, help="seed")
-    arg_lfsr.add_argument("--params", type=str, required=True, help="path to model params file")
-    arg_lfsr.add_argument("--iters", type=int, default=2000, help="num of iterations")
+    arg_infer = subp.add_parser("infer", help="Perform inference using SuSiE PCA")
+    arg_infer.add_argument("X", type=str, help="Experiment CSV file")
+    arg_infer.add_argument("G", type=str, help="Guide CSV file")
+    arg_infer.add_argument("S", type=str, help="Gene symbol CSV file")
 
-    # infer
-    arg_infer = subparsers.add_parser("infer", help="perform inference using SuSiE PCA")
-    arg_infer.add_argument("--X", type=str, required=True, help="path to expression count matrix")
-    arg_infer.add_argument("--z_dim", type=int, required=True, help="latent dimension")
-    arg_infer.add_argument("--l_dim", type=int, required=True, help="num of single effects per factor")
-    arg_infer.add_argument("--G", type=str, required=True, help="path to perturbation density matrix")
-    arg_infer.add_argument("--A", type=str, help="path to annotation matrix")
-    arg_infer.add_argument("--p_prior", type=float, default=0.5, help="prior probability")
-    arg_infer.add_argument("--tau", type=float, default=1.0, help="initial residual precision")
-    arg_infer.add_argument("--standardize", action="store_true", help="standardize input data")
-    arg_infer.add_argument("--init", type=str, choices=["pca", "random"], default="pca", help="init method")
-    arg_infer.add_argument("--learning_rate", type=float, default=1e-2, help="learning rate for inference")
-    arg_infer.add_argument("--max_iter", type=int, default=400, help="maximum num of iterations")
-    arg_infer.add_argument("--tol", type=float, default=1e-3, help="convergence tolerance")
-    arg_infer.add_argument("--seed", type=int, default=0, help="seed")
-
-    argp.add_argument(
+    arg_infer.add_argument(
         "--platform",
         "-p",
         type=str,
         choices=["cpu", "gpu", "tpu"],
         default="cpu",
-        help="platform: cpu, gpu or tpu",
+        help="Platform: cpu, gpu or tpu",
     )
-    argp.add_argument(
+    arg_infer.add_argument(
         "--verbose",
         action="store_true",
         default=False,
-        help="Verbose for logger",
+        help="Enable verbose logging",
     )
-    argp.add_argument("--out", "-o", type=str, help="out file prefix")
+    arg_infer.add_argument(
+        "--out",
+        "-o",
+        required=True,
+        type=str,
+        help="Output file prefix",
+    )
 
     args = argp.parse_args(args)
 
-    jax.config.update("jax_enable_x64", True)  # complaints if using TPU
-    jax.config.update("jax_platform_name", args.platform)
+    config.update("jax_enable_x64", True)
+    config.update("jax_platform_name", args.platform)
+
+    if not os.path.exists(args.out):
+        os.makedirs(args.out)
 
     log = get_logger(__name__, args.out)
+    log.setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
-    if args.verbose:
-        log.setLevel(logging.DEBUG)
-    else:
-        log.setLevel(logging.INFO)
+    if args.command == "infer":
 
-    args = argp.parse_args()
 
-    if args.command == "sim":
-        sim_data = generate_sim(
-            seed=args.seed,
-            l_dim=args.l_dim,
-            n_dim=args.n_dim,
-            p_dim=args.p_dim,
-            z_dim=args.z_dim,
-            g_dim=args.g_dim,
-            b_sparsity=args.b_sparsity,
-            effect_size=args.effect_size,
-        )
-        log.info("simulation completed:", sim_data)
+        log.info(f"Starting PerturbVI infer")
 
-    elif args.command == "lfsr":
-        key = jax.random.PRNGKey(args.seed)
-        lfsr_result = compute_lfsr(key, args.params, iters=args.iters)
-        log.info("LFSR computed:", lfsr_result)
+        non_targeting_column = "Nontargeting"
+        params_file = f"{args.out}/params_file.pkl"
 
-    # TODO: figure out improved IO for all CLI commands and use-cases
-    elif args.command == "infer":
-        X = jax.numpy.load(args.X)
-        G = jax.numpy.load(args.G)
-        A = jax.numpy.load(args.A) if args.A else None
-        results = infer(
-            X=X,
-            z_dim=args.z_dim,
-            l_dim=args.l_dim,
-            G=G,
-            A=A,
-            p_prior=args.p_prior,
-            tau=args.tau,
-            standardize=args.standardize,
-            init=args.init,
-            learning_rate=args.learning_rate,
-            max_iter=args.max_iter,
-            tol=args.tol,
-            seed=args.seed,
-            verbose=args.verbose,
-        )
-        log.info("inference completed: %s", results)
+        log.info(f"Loading experiment data from {args.X}")
+        exp_data = pd.read_csv(args.X, index_col=0)
+        x = jnp.asarray(exp_data)
+        log.info(f"Loaded experiment data shape: {x.shape}")
+
+        log.info(f"Loading guide data from {args.G}")
+        guide_data = pd.read_csv(args.G, index_col=0)
+        log.info(f"Loaded guide data shape: {guide_data.shape}")
+
+        reduced_guide_data = guide_data.drop(columns=[non_targeting_column])
+        g_reduce_sp = sparse.bcoo_fromdense(jnp.array(reduced_guide_data.values))
+
+        # g_sp = sparse.bcoo_fromdense(jnp.array(guide_data.values))
+        # perturb_gene_list = reduced_guide_data.columns.tolist()
+
+        log.info(f"Loading gene symbols from {args.S}")
+        with open(args.S, mode='r', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            gene_symbol = [row[0] for row in reader]
+        log.info(f"Loaded {len(gene_symbol)} gene symbols")
+
+        log.info("Running inference...")
+        results = infer(x, z_dim=12, l_dim=400, G=g_reduce_sp, A=None, p_prior=0.5, standardize=False, init="random",
+                        tau=10, max_iter=500, tol=1e-2)
+
+        np.savetxt(f"{args.out}/W.txt", results.W)
+        np.savetxt(f"{args.out}/pip.txt", results.pip)
+        np.savetxt(f"{args.out}/pve.txt", results.pve)
+
+        with open(params_file, "wb") as fh:
+            pickle.dump(results.params, fh)
+
+        log.info(f"Saved all files to {args.out}")
+        log.info("PerturbVI inference completed.")
 
     return 0
 
 
 def run_cli():
-    return main(sys.argv[1:])
-
+    return _main(sys.argv[1:])
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(_main(sys.argv[1:]))
