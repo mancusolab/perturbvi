@@ -18,7 +18,7 @@ from perturbvi.log import get_logger
 from perturbvi import infer
 
 
-def _main(args):
+def _parse_args(args):
     argp = ap.ArgumentParser(description="PerturbVI: infer regulatory modules from CRISPR perturbation data")
     subp = argp.add_subparsers(
         dest="command",
@@ -53,24 +53,29 @@ def _main(args):
         help="Output file prefix",
     )
 
-    args = argp.parse_args(args)
+    return argp.parse_args(args)
+
+
+def _main(args):
+    args = _parse_args(args)
 
     config.update("jax_enable_x64", True)
     config.update("jax_platform_name", args.platform)
 
-    if not os.path.exists(args.out):
-        os.makedirs(args.out)
+    out = args.out.rstrip('/')
 
-    log = get_logger(__name__, args.out)
+    if not os.path.exists(out):
+        os.makedirs(out)
+
+    log = get_logger(__name__, out)
     log.setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
     if args.command == "infer":
 
-
         log.info(f"Starting PerturbVI infer")
 
         non_targeting_column = "Nontargeting"
-        params_file = f"{args.out}/params_file.pkl"
+        params_file = f"{out}/params_file.pkl"
 
         log.info(f"Loading experiment data from {args.X}")
         exp_data = pd.read_csv(args.X, index_col=0)
@@ -97,14 +102,14 @@ def _main(args):
         results = infer(x, z_dim=12, l_dim=400, G=g_reduce_sp, A=None, p_prior=0.5, standardize=False, init="random",
                         tau=10, max_iter=500, tol=1e-2)
 
-        np.savetxt(f"{args.out}/W.txt", results.W)
-        np.savetxt(f"{args.out}/pip.txt", results.pip)
-        np.savetxt(f"{args.out}/pve.txt", results.pve)
+        np.savetxt(f"{out}/W.txt", results.W)
+        np.savetxt(f"{out}/pip.txt", results.pip)
+        np.savetxt(f"{out}/pve.txt", results.pve)
 
         with open(params_file, "wb") as fh:
             pickle.dump(results.params, fh)
 
-        log.info(f"Saved all files to {args.out}")
+        log.info(f"Saved all files to {out}")
         log.info("PerturbVI inference completed.")
 
     return 0

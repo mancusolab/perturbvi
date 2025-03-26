@@ -28,22 +28,25 @@ pip install .
 
 ## Get Started with `perturbvi`
 
-### Command Syntax
+### 1. `infer`
+Perform inference using SuSiE PCA to find the regulatory modules from CRISPR perturbation data
 ``` bash
 perturbvi infer <exp_csv> <guide_csv> <gene_symbol_csv> -o=output --verbose
 ```
 
-### Arguments
+#### Arguments
 - `exp_csv`: Path to the experiment CSV file.
 - `guide_csv`: Path to the guide CSV file.
 - `gene_symbol_csv`: Path to the gene symbol CSV file.
 - `-o=output`: Specifies the output directory name or path.
 - `--verbose`: For logging (Optional).
 
-### Example Usage
+#### Example Usage
 ```bash
 perturbvi infer data/exp.csv data/guide.csv data/symbol.csv -o=data/out --verbose
 ```
+
+This will save the all the output files (including the parameter file `params.pkl`) into the `data/out` folder, which can be used for the downstream tasks outlined below.
 
 ## Notes
 
