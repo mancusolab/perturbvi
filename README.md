@@ -28,7 +28,23 @@ pip install .
 
 ## Get Started with Example
 
-TBD
+``` bash
+perturbvi infer <exp_csv> <guide_csv> <gene_symbol_csv> -o=output --verbose
+```
+`exp_csv`: Experiment CSV File Path
+
+`guide_csv`: Guide CSV File Path
+
+`gene_symbol_csv`: Gene Symbol CSV File Path
+
+`-o=output`: Here `output` is the output directory name/path
+
+`--verbose`: Optional
+
+This could look like this:
+```bash
+perturbvi infer data/exp.csv data/guide.csv data/symbol.csv -o=data/out --verbose
+```
 
 ## Notes
 
