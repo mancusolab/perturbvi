@@ -227,102 +227,82 @@ def _init_params(
     tau: float = 1.0,
     init: _init_type = "pca",
 ) -> ModelParams:
-    """Initialize parameters for PerturbVI
-
-    **Arguments:**
-
-    -`rng_key` [`PRNGKey`]: Random number generator seed
-
-    -`X` [`Array`]: Input data. Should be an array-like
-
-    -`guide` [`GuideModel`]: Guide model
-
-    -`factors` [`FactorModel`]: Factor model
-
-    -`loadings` [`LoadingModel`]: Loadings model
-
-    -`annotations` [`PriorModel`]: Annotation model
-
-    -`p_prior` [`float`]: Prior probability for each perturbation being non-zero.
-
-    -`tau` [`float`]: Initial value of residual precision
-
-    -`init` [`str`]: How to initialize the variational mean parameters for latent factors.
-        Either "pca" or "random" (default = "pca")
-
-    **Returns:**
-
-    -`ModelParams` [`ModelParams`]: Initialized set of model parameters
-
-    Raises:
-        ValueError: Invalid initialization scheme.
-    """
+    print("Starting model parameter initialization...")
+    
+    # Base parameters
     n_dim, p_dim = X.shape
     tau_0 = jnp.ones((l_dim, z_dim))
+    tau_0.block_until_ready()
+    print("✓ Base parameters initialized (5%)")
 
-    (
-        rng_key,
-        svd_key,
-        mu_key,
-        var_key,
-        muw_key,
-        varw_key,
-        alpha_key,
-        beta_key,
-        var_beta_key,
-        theta_key,
-    ) = random.split(rng_key, 10)
+    # Random keys
+    keys = random.split(rng_key, 10)
+    keys[0].block_until_ready()
+    rng_key, svd_key, mu_key, var_key, muw_key, varw_key, alpha_key, beta_key, var_beta_key, theta_key = keys
+    print("✓ Random keys setup (10%)")
 
-    # pull type options for init
-    type_options = get_args(_init_type)
-
-    # compute tr(X'X)
+    # Data statistics
     x_ssq = jnp.sum(X * X)
+    x_ssq.block_until_ready()
+    print("✓ Data statistics computed (15%)")
 
+    # Factors
     if init == "pca":
-        # run PCA and extract weights and latent
-        print("Initialize factors using probabilistic PCA")
         init_mu_z, _ = prob_pca(svd_key, X, k=z_dim)
-        print("Factor initialization finished.")
-    elif init == "random":
-        # random initialization
-        init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
-        print("Factor initialization finished.")
     else:
-        raise ValueError(f"Unknown initialization provided '{init}'; Choices: {type_options}")
+        init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
+    init_mu_z.block_until_ready()
+    print("✓ Factors initialized (35%)")
 
+    # Factor variance
     init_var_z = jnp.diag(random.normal(var_key, shape=(z_dim,)) ** 2)
+    init_var_z.block_until_ready()
+    print("✓ Factor variance set (45%)")
 
-    # each w_kl has a specific variance term
+    # Loadings
     init_mu_w = random.normal(muw_key, shape=(l_dim, z_dim, p_dim)) * 1e-3
     init_var_w = (1 / tau_0) * (random.normal(varw_key, shape=(l_dim, z_dim))) ** 2
+    init_mu_w.block_until_ready()
+    init_var_w.block_until_ready()
+    print("✓ Loadings initialized (60%)")
 
-    init_alpha = random.dirichlet(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
+    # Alpha and pi
+    #init_alpha = random.dirichlet(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
+    #init_alpha =jax.jit(random.dirichlet)(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
+    init_alpha = jnp.full((l_dim, z_dim, p_dim), 1. / p_dim)
+    print("Avoid dirichlet process")
+    init_alpha.block_until_ready()
     if isinstance(annotations, AnnotationPriorModel):
         p_dim, m = annotations.shape
         theta = random.normal(theta_key, shape=(m, z_dim))
-        pi = nn.softmax(annotations.A @ theta, axis=0).T  # type: ignore
+        pi = nn.softmax(annotations.A @ theta, axis=0).T
+        theta.block_until_ready()
+        pi.block_until_ready()
     else:
         theta = None
         pi = jnp.ones(shape=(z_dim, p_dim)) / p_dim
+        pi.block_until_ready()
+    print("✓ Annotations setup complete (75%)")
 
-    # Initialization for perturbation effects
+    # Perturbation effects
     n_dim, g_dim = guide.shape
-    # Notice: shape maybe (z_dim,): same for all feature in each component
     tau_beta = jnp.ones((z_dim,))
     init_mu_beta = random.normal(beta_key, shape=(g_dim, z_dim)) * 1e-3
     init_var_beta = (1 / tau_beta) * random.normal(var_beta_key, shape=(g_dim, z_dim)) ** 2
+    tau_beta.block_until_ready()
+    init_mu_beta.block_until_ready()
+    init_var_beta.block_until_ready()
+    print("✓ Perturbation effects initialized (90%)")
 
-    # uniform prior for eta
+    # Priors
     if p_prior is not None:
         p_prior = p_prior * jnp.ones(g_dim)
-    else:
-        p_prior = None
-
-    # Initialization of variational params for eta
-    # p_hat is in shape of (z_dim,g_dim)
+        p_prior.block_until_ready()
     p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
-    print("Model paramterters initialization finished.")
+    p_hat.block_until_ready()
+    print("✓ Priors setup complete (100%)")
+    
+    print("\n✓ Model parameter initialization completed successfully")
 
     return ModelParams(
         x_ssq,
@@ -331,7 +311,7 @@ def _init_params(
         init_mu_w,
         init_var_w,
         init_alpha,
-        jnp.array(tau, dtype=float), # avoid weak-type, which causes recompilation downstream...
+        jnp.array(tau, dtype=float),
         tau_0,
         theta=theta,
         pi=pi,
