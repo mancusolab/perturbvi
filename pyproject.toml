@@ -34,7 +34,10 @@ dependencies = [
     "optax",
     "plum-dispatch",
     "pandas",
-    "numpy"
+    "numpy",
+    "matplotlib",
+    "seaborn",
+    "adjustText"
 ]
 
 [project.scripts]
