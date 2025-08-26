@@ -29,7 +29,7 @@ def _parse_args(args):
     arg_infer = subp.add_parser("infer", help="Perform inference using SuSiE PCA")
     arg_infer.add_argument("X", type=str, help="Experiment CSV file")
     arg_infer.add_argument("G", type=str, help="Guide CSV file")
-    arg_infer.add_argument("S", type=str, help="Gene symbol CSV file")
+    # arg_infer.add_argument("S", type=str, help="Gene symbol CSV file")
 
     arg_infer.add_argument(
         "--platform",
@@ -92,11 +92,11 @@ def _main(args):
         # g_sp = sparse.bcoo_fromdense(jnp.array(guide_data.values))
         # perturb_gene_list = reduced_guide_data.columns.tolist()
 
-        log.info(f"Loading gene symbols from {args.S}")
-        with open(args.S, mode='r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            gene_symbol = [row[0] for row in reader]
-        log.info(f"Loaded {len(gene_symbol)} gene symbols")
+        # log.info(f"Loading gene symbols from {args.S}")
+        # with open(args.S, mode='r', encoding='utf-8') as file:
+        #     reader = csv.reader(file)
+        #     gene_symbol = [row[0] for row in reader]
+        # log.info(f"Loaded {len(gene_symbol)} gene symbols")
 
         log.info("Running inference...")
         results = infer(x, z_dim=12, l_dim=400, G=g_reduce_sp, A=None, p_prior=0.5, standardize=False, init="random",
