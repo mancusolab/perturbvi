@@ -23,7 +23,7 @@
 uv pip install susiepca@git+https://github.com/mancusolab/susiepca.git@main
 
 # install perturbvi
-pip install perturbvi
+uv pip install perturbvi
 
 # help
 perturbvi --help
