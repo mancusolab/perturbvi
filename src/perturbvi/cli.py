@@ -1,122 +1,92 @@
-# #!/usr/bin/env python3
 import argparse as ap
-
-import pandas as pd
-import numpy as np
-
 import logging
-import pickle
-import csv
+from pathlib import Path
 import sys
 import os
 
-from jax import config
+import susiepca as sp
+import scanpy as sc
+import numpy as np
+import pandas as pd
+
+import jax
 import jax.numpy as jnp
 from jax.experimental import sparse
 
-from perturbvi.log import get_logger
-from perturbvi import infer
+import perturbvi
 
+jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_default_matmul_precision", "highest")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
-def _parse_args(args):
-    argp = ap.ArgumentParser(description="PerturbVI: infer regulatory modules from CRISPR perturbation data")
-    subp = argp.add_subparsers(
-        dest="command",
-        help="Subcommands: infer to perform regulatory module inference using SuShiE PCA",
-        required=True,
+def main(args):
+    argp = ap.ArgumentParser(description="Run perturbVI inference")
+    argp.add_argument("matrix", type=str, help="residual h5ad or csv file")
+    argp.add_argument("guide", type=str, help="guide csv file")
+    argp.add_argument("z_dim", type=int, help="Number of latent factors")
+    argp.add_argument("l_dim", type=int, help="Number of single effects")
+    argp.add_argument("tau", type=int, help="residual precision")
+    argp.add_argument("-o", "--output", type=str, help="Output directory")
+    argp.add_argument(
+        "--device", choices=["cpu", "gpu"], default="cpu", help="JAX device to use"
     )
 
-    arg_infer = subp.add_parser("infer", help="Perform inference using SuSiE PCA")
-    arg_infer.add_argument("X", type=str, help="Experiment CSV file")
-    arg_infer.add_argument("G", type=str, help="Guide CSV file")
-    # arg_infer.add_argument("S", type=str, help="Gene symbol CSV file")
+    args = argp.parse_args(args)
+    os.makedirs(args.output, exist_ok=True)
 
-    arg_infer.add_argument(
-        "--platform",
-        "-p",
-        type=str,
-        choices=["cpu", "gpu", "tpu"],
-        default="cpu",
-        help="Platform: cpu, gpu or tpu",
+    matrix_path = Path(args.matrix)
+    guide_path = Path(args.guide)
+    ext = matrix_path.suffix.lower()
+
+    if matrix_path.exists() and guide_path.exists():
+        logging.info("files OK!")
+    else:
+        logging.error("files not found!")
+        sys.exit(1)
+
+    if ext == ".h5ad":
+        dt = sc.read_h5ad(matrix_path)
+        data = dt.X
+    elif ext == ".csv":
+        data = jnp.asarray(pd.read_csv(matrix_path, index_col=0)).astype(jnp.float64)
+    else:
+        raise ValueError(f"Unsupported file type: {ext}")
+
+    df_G = pd.read_csv(guide_path, index_col=0)
+    df_G = df_G.drop(
+        ["cell_barcode", "non-targeting", "Nontargeting"], axis=1, errors="ignore"
     )
-    arg_infer.add_argument(
-        "--verbose",
-        action="store_true",
-        default=False,
-        help="Enable verbose logging",
+    G = jnp.asarray(df_G).astype(jnp.float64)
+    g_sp = sparse.bcoo_fromdense(G)
+    del G, df_G
+
+    logging.info("starting inference")
+
+    results = perturbvi.infer(
+        data,
+        z_dim=args.z_dim,
+        l_dim=args.l_dim,
+        G=g_sp,
+        A=None,
+        p_prior=0.1,
+        standardize=True,
+        init="random",
+        tau=args.tau,
+        tol=1e-2,
+        max_iter=500,
     )
-    arg_infer.add_argument(
-        "--out",
-        "-o",
-        required=True,
-        type=str,
-        help="Output file prefix",
+
+    logging.info("finished inference!")
+
+    logging.info(
+        f"PVE across {args.z_dim} factors are {results.pve}; total PVE is {np.sum(results.pve)}"
     )
 
-    return argp.parse_args(args)
+    sp.io.save_results(results, path=args.output)
+    logging.info("saved results!")
 
-
-def _main(args):
-    args = _parse_args(args)
-
-    config.update("jax_enable_x64", True)
-    config.update("jax_platform_name", args.platform)
-
-    out = args.out.rstrip('/')
-
-    if not os.path.exists(out):
-        os.makedirs(out)
-
-    log = get_logger(__name__, out)
-    log.setLevel(logging.DEBUG if args.verbose else logging.INFO)
-
-    if args.command == "infer":
-
-        log.info(f"Starting PerturbVI infer")
-
-        non_targeting_column = "Nontargeting"
-        params_file = f"{out}/params_file.pkl"
-
-        log.info(f"Loading experiment data from {args.X}")
-        exp_data = pd.read_csv(args.X, index_col=0)
-        x = jnp.asarray(exp_data)
-        log.info(f"Loaded experiment data shape: {x.shape}")
-
-        log.info(f"Loading guide data from {args.G}")
-        guide_data = pd.read_csv(args.G, index_col=0)
-        log.info(f"Loaded guide data shape: {guide_data.shape}")
-
-        reduced_guide_data = guide_data.drop(columns=[non_targeting_column])
-        g_reduce_sp = sparse.bcoo_fromdense(jnp.array(reduced_guide_data.values))
-
-        # g_sp = sparse.bcoo_fromdense(jnp.array(guide_data.values))
-        # perturb_gene_list = reduced_guide_data.columns.tolist()
-
-        # log.info(f"Loading gene symbols from {args.S}")
-        # with open(args.S, mode='r', encoding='utf-8') as file:
-        #     reader = csv.reader(file)
-        #     gene_symbol = [row[0] for row in reader]
-        # log.info(f"Loaded {len(gene_symbol)} gene symbols")
-
-        log.info("Running inference...")
-        results = infer(x, z_dim=12, l_dim=400, G=g_reduce_sp, A=None, p_prior=0.5, standardize=False, init="random",
-                        tau=10, max_iter=500, tol=1e-2)
-
-        np.savetxt(f"{out}/W.txt", results.W)
-        np.savetxt(f"{out}/pip.txt", results.pip)
-        np.savetxt(f"{out}/pve.txt", results.pve)
-
-        with open(params_file, "wb") as fh:
-            pickle.dump(results.params, fh)
-
-        log.info(f"Saved all files to {out}")
-        log.info("PerturbVI inference completed.")
-
-    return 0
-
-
-def run_cli():
-    return _main(sys.argv[1:])
 
 if __name__ == "__main__":
-    sys.exit(_main(sys.argv[1:]))
+    sys.exit(main(sys.argv[1:]))
