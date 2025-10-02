@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "perturbvi"
-version="0.1.3"
+version="0.1.4"
 description = 'Infer regulatory modules through informative latent component model in the single-cell Perturb-seq data'
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,6 +12,7 @@ license = "MIT"
 keywords = []
 authors = [
   { name = "Dong Yuan", email = "dongyuan@usc.edu" },
+  { name = "Abdullah Al-Nahid", email = "alnahid@usc.edu" },
   { name = "Nicholas Mancuso", email = "nmancuso@usc.edu" },
 ]
 classifiers = [
@@ -35,9 +36,10 @@ dependencies = [
     "plum-dispatch",
     "pandas",
     "numpy",
+    "scanpy",
     "matplotlib",
     "seaborn",
-    "adjustText"
+    "adjustText",
 ]
 
 [project.scripts]

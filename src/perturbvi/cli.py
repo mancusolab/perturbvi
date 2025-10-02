@@ -1,6 +1,6 @@
+from pathlib import Path
 import argparse as ap
 import logging
-from pathlib import Path
 import sys
 import os
 
@@ -13,17 +13,15 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import sparse
 
-import perturbvi
+from perturbvi.log import get_logger
+from perturbvi import infer
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_default_matmul_precision", "highest")
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 
 def main(args):
     argp = ap.ArgumentParser(description="Run perturbVI inference")
-    argp.add_argument("matrix", type=str, help="residual h5ad or csv file")
+    argp.add_argument("matrix", type=str, help="perturbation matrix (csv) file")
     argp.add_argument("guide", type=str, help="guide csv file")
     argp.add_argument("z_dim", type=int, help="Number of latent factors")
     argp.add_argument("l_dim", type=int, help="Number of single effects")
@@ -32,18 +30,25 @@ def main(args):
     argp.add_argument(
         "--device", choices=["cpu", "gpu"], default="cpu", help="JAX device to use"
     )
+    argp.add_argument(
+        "--verbose", action="store_true", default=False, help="verbose logging",
+    )
 
     args = argp.parse_args(args)
-    os.makedirs(args.output, exist_ok=True)
+
+    out = args.output.rstrip('/')
+    os.makedirs(out, exist_ok=True)
+    log = get_logger(__name__, out)
+    log.setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
     matrix_path = Path(args.matrix)
     guide_path = Path(args.guide)
     ext = matrix_path.suffix.lower()
 
     if matrix_path.exists() and guide_path.exists():
-        logging.info("files OK!")
+        log.info("files OK!")
     else:
-        logging.error("files not found!")
+        log.error("files not found!")
         sys.exit(1)
 
     if ext == ".h5ad":
@@ -62,9 +67,9 @@ def main(args):
     g_sp = sparse.bcoo_fromdense(G)
     del G, df_G
 
-    logging.info("starting inference")
+    log.info("starting inference...")
 
-    results = perturbvi.infer(
+    results = infer(
         data,
         z_dim=args.z_dim,
         l_dim=args.l_dim,
@@ -78,15 +83,18 @@ def main(args):
         max_iter=500,
     )
 
-    logging.info("finished inference!")
+    log.info("finished inference!")
 
-    logging.info(
+    log.info(
         f"PVE across {args.z_dim} factors are {results.pve}; total PVE is {np.sum(results.pve)}"
     )
 
-    sp.io.save_results(results, path=args.output)
-    logging.info("saved results!")
+    sp.io.save_results(results, path=out)
+    log.info("saved results!")
 
+
+def run_cli():
+    return main(sys.argv[1:])
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

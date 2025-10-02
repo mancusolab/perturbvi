@@ -18,34 +18,39 @@
 
 ## Installation
 
-Users can download the latest repository and then use `pip`:
-
 ``` bash
-git clone https://github.com/mancusolab/perturbvi.git
-cd perturbvi
-pip install .
+# install susiepca dependency
+uv pip install susiepca@git+https://github.com/mancusolab/susiepca.git@main
+
+# install perturbvi
+pip install perturbvi
+
+# help
+perturbvi --help
 ```
 
 ## Get Started with `perturbvi`
 
-### 1. `infer`
 Perform inference using SuSiE PCA to find the regulatory modules from CRISPR perturbation data
 ``` bash
-perturbvi infer <exp_csv> <guide_csv> <gene_symbol_csv> -o=output --verbose
+perturbvi <matrix> <guide> <z_dim> <l_dim> <tau> -o=<out_dir> --verbose
 ```
 
 #### Arguments
-- `exp_csv`: Path to the experiment CSV file.
-- `guide_csv`: Path to the guide CSV file.
-- `-o=output`: Specifies the output directory name or path.
+- `matrix`: Path to the experiment CSV file.
+- `guide`: Path to the guide CSV file.
+- `z_dim`: Number of latent factors, Z dim (12).
+- `l_dim`: Number of single effects, L dim (400).
+- `tau`: Residual precision, Tau (800).
+- `out_dir`: Specifies the output directory path.
 - `--verbose`: For logging (Optional).
 
 #### Example Usage
 ```bash
-perturbvi infer data/exp.csv data/guide.csv -o=data/out --verbose
+perturbvi luhmes_exp.csv luhmes_G.csv 12 400 800 -o=results --verbose
 ```
 
-This will save the all the output files (including the parameter file `params.pkl`) into the `data/out` folder, which can be used for the downstream tasks outlined below.
+This will save the all the output files (including the parameter file `params.pkl`) into the `results` folder, which can be used for the downstream tasks.
 
 ## Notes
 
