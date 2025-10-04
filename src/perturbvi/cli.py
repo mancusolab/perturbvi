@@ -4,7 +4,6 @@ import logging
 import sys
 import os
 
-import susiepca as sp
 import scanpy as sc
 import numpy as np
 import pandas as pd
@@ -13,6 +12,7 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import sparse
 
+from perturbvi.io import save_results
 from perturbvi.log import get_logger
 from perturbvi import infer
 
@@ -53,7 +53,7 @@ def main(args):
 
     if ext == ".h5ad":
         dt = sc.read_h5ad(matrix_path)
-        data = dt.X
+        data = jnp.asarray(dt.X)
     elif ext == ".csv":
         data = jnp.asarray(pd.read_csv(matrix_path, index_col=0)).astype(jnp.float64)
     else:
@@ -89,7 +89,7 @@ def main(args):
         f"PVE across {args.z_dim} factors are {results.pve}; total PVE is {np.sum(results.pve)}"
     )
 
-    sp.io.save_results(results, path=out)
+    save_results(results, path=out)
     log.info("saved results!")
 
 

@@ -9,8 +9,6 @@ import seaborn as sns
 
 from adjustText import adjust_text
 
-from perturbvi.common import SuSiEPCAResults
-
 from .infer import InferResults
 
 
@@ -18,7 +16,7 @@ __all__ = ["save_results"]
 
 
 # save all results as a pickle object
-def save_results(results: SuSiEPCAResults, path: str):
+def save_results(results: InferResults, path: str):
     """Create a function to save SuSiE PCA results returned by function
     perturbvi.infer
 
