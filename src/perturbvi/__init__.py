@@ -8,7 +8,10 @@ from .infer import (
     infer as infer,
 )
 from .sim import generate_sim as generate_sim
-from .utils import compute_lfsr as compute_lfsr
+from .utils import (
+    compute_lfsr as compute_lfsr,
+    luhmes_analysis as luhmes_analysis,
+)
 from .io import save_results as save_results
 
 
