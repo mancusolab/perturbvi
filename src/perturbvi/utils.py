@@ -3,6 +3,8 @@ from functools import partial
 
 import numpy as np
 import pandas as pd
+import pickle
+import os
 
 import equinox as eqx
 import jax.scipy.special as jspec
@@ -273,3 +275,102 @@ def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
     print(f"Mean and standard deviation for num_zero: {mean_zero}, {std_zero}")
 
     return df
+
+
+def find_top_genes(df, pip_cutoff = 0.9):
+    # Initialize an empty dictionary
+    high_value_genes = {}
+
+    # Iterate over each column in the DataFrame
+    for column in df.columns:
+        # Find the rows in the current column with values greater than 0.9
+        high_values = df[df[column] > pip_cutoff].index.tolist()
+        # Store these rows in the dictionary
+        high_value_genes[column] = high_values
+        
+    return high_value_genes
+
+def luhmes_analysis(dir: str):
+    """Create a function to give a quick summary of LUHMES results
+
+    Args:
+        dir: Results directory
+
+    """
+    params_path = f"{dir}/params_file.pkl"
+    pip_path = f"{dir}/pip.txt"
+    W_path = f"{dir}/W.txt"
+    pip_df_path = f"{dir}/pip.csv"
+    lfsr_path = f"{dir}/lfsr.csv"
+    p_hat_path = f"{dir}/p_hat.csv"
+    beta_path = f"{dir}/beta_target.csv"
+    overall_path = f"{dir}/overall_effect.csv"
+
+    with open(params_path, "rb") as file:
+        params = pickle.load(file)
+
+    pip = np.loadtxt(pip_path)
+    W = pd.DataFrame(np.loadtxt(W_path))
+
+    z_dim, p_dim = params.W.shape
+    g_dim, z_dim = params.mean_beta.shape
+    n_dim, z_dim = params.mean_z.shape
+    print(f"Dims: z_dim={z_dim}, p_dim={p_dim}, g_dim={g_dim}, n_dim={n_dim}\n")
+    column_names_b = [f"b{i}" for i in range(z_dim)]
+    column_names_w = [f"w{i}" for i in range(z_dim)]
+
+    beta_sparse = params.mean_beta * params.p_hat.T
+    overall_effect = beta_sparse @ params.W
+    # pip_df = pd.DataFrame(pip.T, columns=column_names_w, index=gene_symbol)
+    pip_df = pd.DataFrame(pip.T, columns=column_names_w)
+    perturb_degs = find_top_genes(pip_df,0.90)
+
+    pip_df.to_csv(pip_df_path)
+    analysis = pip_analysis(jnp.asarray(pip).astype(jnp.float32),rho=0.90,rho_prime=0.10)
+
+    skip_lfsr = os.path.exists(lfsr_path)
+    if skip_lfsr:
+        print("\nlfsr.csv exists. skipping lfsr compute...")
+        lfsr_df = pd.read_csv(lfsr_path, index_col=0)
+    else:
+        print("\ncomputing lfsr...")
+        lfsr = compute_lfsr(key=rdm.PRNGKey(0), params=params, iters=2000)
+        lfsr.block_until_ready()
+        lfsr_np = np.array(lfsr)
+
+        # lfsr_df = pd.DataFrame(lfsr_np.T, index=gene_symbol, columns=perturb_gene_list)
+        lfsr_df = pd.DataFrame(lfsr_np.T)
+        lfsr_df.to_csv(lfsr_path)
+
+    # p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b, index=perturb_gene_list)
+    p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b)
+    p_hat_df.to_csv(p_hat_path)
+        
+    # beta_target = pd.DataFrame(beta_sparse, columns=column_names_b, index=perturb_gene_list)
+    beta_df = pd.DataFrame(beta_sparse, columns=column_names_b)
+    beta_df.to_csv(beta_path)
+
+    # overall_effect_df = pd.DataFrame(overall_effect.T, columns=perturb_gene_list, index=gene_symbol)
+    overall_df = pd.DataFrame(overall_effect.T)
+    overall_df.to_csv(overall_path)
+
+    print("\nshape of W df", W.shape)
+    print("shape of pip df", pip_df.shape)
+    print("shape of lfsr df", lfsr_df.shape)
+    print("shape of p_hat df", p_hat_df.shape)
+    print("shape of beta target df", beta_df.shape)
+    print("shape of overall effect df", overall_df.shape)
+
+    print("\nDone!")
+
+    return {
+        "params": params,
+        "W_df": W,
+        "pip_df": pip_df,
+        "pip_analysis": analysis,
+        "perturb_degs": perturb_degs,
+        "lfsr_df": lfsr_df,
+        "p_hat_df": p_hat_df,
+        "beta_df": beta_df,
+        "overall_effect_df": overall_df,
+    }
