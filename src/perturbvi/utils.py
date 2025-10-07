@@ -331,7 +331,8 @@ def luhmes_analysis(dir: str, genes: List[str], perturbed: List[str]):
     if skip_lfsr:
         print("\nlfsr.csv exists. skipping lfsr compute...")
         lfsr_df = pd.read_csv(lfsr_path, index_col=0)
-        lfsr_df.set_index(genes)
+
+        lfsr_df.index = pd.Index(genes)
         lfsr_df.columns = perturbed
         lfsr_df.to_csv(lfsr_path)
     else:
