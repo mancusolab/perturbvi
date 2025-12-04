@@ -41,56 +41,56 @@ def save_results(results: InferResults, path: str):
     return
 
 
-# function to find genes with high pip
-def find_top_genes(
-    results: InferResults, pip_cutoff: float = 0.9, gene_symbol: Optional[list] = None, filepath: Optional[str] = None
-) -> dict:
-    """Find genes with high posterior inclusion probabilities (PIPs) and optionally save results.
+# # function to find genes with high pip
+# def find_top_genes(
+#     results: InferResults, pip_cutoff: float = 0.9, gene_symbol: Optional[list] = None, filepath: Optional[str] = None
+# ) -> dict:
+#     """Find genes with high posterior inclusion probabilities (PIPs) and optionally save results.
 
-    Args:
-        results: InferResults object containing inference results
-        pip_cutoff: Threshold for considering a PIP value as significant (default: 0.9)
-        gene_symbol: Optional list of gene symbols to use as row indices. If None, uses numeric indices
-        filepath: Optional path to save results. If provided, saves results as CSV with columns:
-                 'factor', 'gene', 'pip_value'
+#     Args:
+#         results: InferResults object containing inference results
+#         pip_cutoff: Threshold for considering a PIP value as significant (default: 0.9)
+#         gene_symbol: Optional list of gene symbols to use as row indices. If None, uses numeric indices
+#         filepath: Optional path to save results. If provided, saves results as CSV with columns:
+#                  'factor', 'gene', 'pip_value'
 
-    Returns:
-        dict: Dictionary mapping each factor to list of genes with PIP > cutoff
-    """
-    # Create PIP DataFrame
-    z_dim, p_dim = results.params.W.shape
-    column_names = [f"w{i}" for i in range(z_dim)]
+#     Returns:
+#         dict: Dictionary mapping each factor to list of genes with PIP > cutoff
+#     """
+#     # Create PIP DataFrame
+#     z_dim, p_dim = results.params.W.shape
+#     column_names = [f"w{i}" for i in range(z_dim)]
 
-    if gene_symbol is not None:
-        if len(gene_symbol) != p_dim:
-            raise ValueError(f"Length of gene_symbol ({len(gene_symbol)}) must match number of genes ({p_dim})")
-        df = pd.DataFrame(results.pip.T, columns=column_names, index=gene_symbol)
-    else:
-        df = pd.DataFrame(results.pip.T, columns=column_names)
+#     if gene_symbol is not None:
+#         if len(gene_symbol) != p_dim:
+#             raise ValueError(f"Length of gene_symbol ({len(gene_symbol)}) must match number of genes ({p_dim})")
+#         df = pd.DataFrame(results.pip.T, columns=column_names, index=gene_symbol)
+#     else:
+#         df = pd.DataFrame(results.pip.T, columns=column_names)
 
-    # Initialize an empty dictionary
-    high_value_genes = {}
+#     # Initialize an empty dictionary
+#     high_value_genes = {}
 
-    # Iterate over each column (factor) in the DataFrame
-    for column in df.columns:
-        # Find the rows in the current column with values greater than cutoff
-        high_values_mask = df[column] > pip_cutoff
-        high_values = df.index[high_values_mask].tolist()
-        # Store these rows in the dictionary
-        high_value_genes[column] = high_values
+#     # Iterate over each column (factor) in the DataFrame
+#     for column in df.columns:
+#         # Find the rows in the current column with values greater than cutoff
+#         high_values_mask = df[column] > pip_cutoff
+#         high_values = df.index[high_values_mask].tolist()
+#         # Store these rows in the dictionary
+#         high_value_genes[column] = high_values
 
-    # Save to file if filepath is provided
-    if filepath is not None:
-        # Create a list to store rows for the DataFrame
-        rows = []
-        for factor, genes in high_value_genes.items():
-            for gene in genes:
-                rows.append({"factor": factor, "gene": gene, "pip_value": df.loc[gene, factor]})
-        # Convert to DataFrame and save
-        results_df = pd.DataFrame(rows)
-        results_df.to_csv(filepath, index=False)
+#     # Save to file if filepath is provided
+#     if filepath is not None:
+#         # Create a list to store rows for the DataFrame
+#         rows = []
+#         for factor, genes in high_value_genes.items():
+#             for gene in genes:
+#                 rows.append({"factor": factor, "gene": gene, "pip_value": df.loc[gene, factor]})
+#         # Convert to DataFrame and save
+#         results_df = pd.DataFrame(rows)
+#         results_df.to_csv(filepath, index=False)
 
-    return high_value_genes
+#     return high_value_genes
 
 
 def save_pip(results: InferResults, gene_symbol: Optional[list] = None, filepath: Optional[str] = None) -> pd.DataFrame:

@@ -1,8 +1,8 @@
 from datetime import datetime
 from functools import partial
 
-import numpy as np
 import pandas as pd
+import numpy as np
 import pickle
 import os
 
@@ -12,8 +12,6 @@ import lineax as lx
 
 from jax import jit, lax, numpy as jnp, random as rdm
 from jaxtyping import Array
-from typing import List
-
 
 multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
 
@@ -280,20 +278,17 @@ def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
 
 def find_top_genes(df, pip_cutoff = 0.9):
     high_value_genes = {}
-
     for column in df.columns:
         high_values = df[df[column] > pip_cutoff].index.tolist()
         high_value_genes[column] = high_values
-    
     return high_value_genes
 
-def luhmes_analysis(dir: str, genes: List[str], perturbed: List[str]):
+def luhmes_analysis(dir: str, guide_path: str, gene_path: str):
     """Create a function to give a quick summary of LUHMES results
-
     Args:
         dir: Results directory
-        genes: Gene symbols
-        perturbed: Perturbed gene list
+        guide_path: Guide file path (csv)
+        gene_path: Gene symbol path (csv)
     """
     params_path = f"{dir}/params_file.pkl"
     pip_path = f"{dir}/pip.txt"
@@ -303,6 +298,13 @@ def luhmes_analysis(dir: str, genes: List[str], perturbed: List[str]):
     p_hat_path = f"{dir}/p_hat.csv"
     beta_path = f"{dir}/beta_target.csv"
     overall_path = f"{dir}/overall_effect.csv"
+
+    # guide_path = "luhmes_G.csv"
+    # gene_path = "luhmes_gene_symbol_v2.csv"
+    G = pd.read_csv(guide_path, index_col=0)
+    G_reduce = G.drop(columns=["Nontargeting"])
+    perturbed = G_reduce.columns.to_list()  # 14 genes perturbed
+    genes = pd.read_csv(gene_path, header=None)[0].to_list()  # 6000 gene symbols (background genes)
 
     with open(params_path, "rb") as file:
         params = pickle.load(file)
@@ -322,16 +324,21 @@ def luhmes_analysis(dir: str, genes: List[str], perturbed: List[str]):
 
     # pip_df = pd.DataFrame(pip.T, columns=column_names_w)
     pip_df = pd.DataFrame(pip.T, columns=column_names_w, index=genes)
-    perturb_degs = find_top_genes(pip_df,0.90)
-
     pip_df.to_csv(pip_df_path)
+    
     analysis = pip_analysis(jnp.asarray(pip).astype(jnp.float32),rho=0.90,rho_prime=0.10)
 
+    for col in pip_df.columns:
+        sig_genes = pip_df.index[pip_df[col] > 0.9].tolist()
+        if not os.path.exists(f"{dir}/pip"):
+            os.makedirs(f"{dir}/pip")
+        np.savetxt(f"{dir}/pip/{col}_sig_genes.txt", sig_genes, fmt="%s")
+        print(f"Saved {len(sig_genes)} sig. genes for {col} (PIP > 0.9) in {dir}/pip/{col}_sig_genes.txt")
     skip_lfsr = os.path.exists(lfsr_path)
+
     if skip_lfsr:
         print("\nlfsr.csv exists. skipping lfsr compute...")
         lfsr_df = pd.read_csv(lfsr_path, index_col=0)
-
         lfsr_df.index = pd.Index(genes)
         lfsr_df.columns = perturbed
         lfsr_df.to_csv(lfsr_path)
@@ -340,10 +347,25 @@ def luhmes_analysis(dir: str, genes: List[str], perturbed: List[str]):
         lfsr = compute_lfsr(key=rdm.PRNGKey(0), params=params, iters=2000)
         lfsr.block_until_ready()
         lfsr_np = np.array(lfsr)
-
         # lfsr_df = pd.DataFrame(lfsr_np.T)
         lfsr_df = pd.DataFrame(lfsr_np.T, index=genes, columns=perturbed)
         lfsr_df.to_csv(lfsr_path)
+
+    # number of degs per w from PIP (find top genes with high pip)
+    # top_pip_degs = find_top_genes(pip_df,0.90)
+    # number of degs per w from PIP
+    num_deg_per_w = (pip_df>0.9).sum(axis=0)
+
+
+    # number of degs per perturbed gene from LFSR
+    num_deg_per_gene = (lfsr_df<0.05).sum(axis=0)
+
+    for col in lfsr_df.columns:
+        sig_genes = lfsr_df.index[lfsr_df[col] < 0.05].tolist()
+        if not os.path.exists(f"{dir}/lfsr"):
+            os.makedirs(f"{dir}/lfsr")
+        np.savetxt(f"{dir}/lfsr/{col}_sig_genes.txt", sig_genes, fmt="%s")
+        print(f"Saved {len(sig_genes)} sig. genes for {col} (LFSR < 0.05) in {dir}/lfsr.")
 
     # p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b)
     p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b, index=perturbed)
@@ -364,14 +386,18 @@ def luhmes_analysis(dir: str, genes: List[str], perturbed: List[str]):
     print("shape of beta target df", beta_df.shape)
     print("shape of overall effect df", overall_df.shape)
 
-    print("\nDone!")
+    print("\nDone!\n")
+
+    print(f"To check significant DEGs per W, see {dir}/pip")
+    print(f"To check significant DEGs per perturbed gene, see {dir}/lfsr\n")
 
     return {
         "params": params,
         "W_df": W,
         "pip_df": pip_df,
         "pip_analysis": analysis,
-        "top_genes": perturb_degs,
+        "num_deg_per_perturbed_gene": num_deg_per_gene,
+        "num_deg_per_w": num_deg_per_w,
         "lfsr_df": lfsr_df,
         "p_hat_df": p_hat_df,
         "beta_df": beta_df,
