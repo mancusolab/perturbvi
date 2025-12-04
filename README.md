@@ -47,7 +47,30 @@ perturbvi <matrix> <guide> <z_dim> <l_dim> <tau> -o=<out_dir> --verbose
 perturbvi luhmes_exp.csv luhmes_G.csv 12 400 800 -o=results --verbose
 ```
 
-This will save the all the output files (including the parameter file `params.pkl`) into the `results` folder, which can be used for the downstream tasks.
+This will save all the files (including `params.pkl`) in `results` folder.
+
+For luhmes results, we can analyze it:
+```python
+import perturbvi
+
+guide_path="luhmes_G.csv"
+gene_symbol_path = "luhmes_gene_symbol.csv"
+
+OUTPUT_DIR = "results"
+
+info = perturbvi.utils.luhmes_analysis(
+  OUTPUT_DIR, 
+  guide_path, 
+  gene_symbol_path
+)
+
+# number of degs per w from PIP
+print(info["num_deg_per_w"])
+
+# number of degs per perturbed gene from LFSR
+print(info["num_deg_per_perturbed_gene"])
+```
+
 
 ## Notes
 
