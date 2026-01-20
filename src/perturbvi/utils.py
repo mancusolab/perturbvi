@@ -12,6 +12,7 @@ import lineax as lx
 
 from jax import jit, lax, numpy as jnp, random as rdm
 from jaxtyping import Array
+from typing import Sequence
 
 multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
 
@@ -283,13 +284,24 @@ def find_top_genes(df, pip_cutoff = 0.9):
         high_value_genes[column] = high_values
     return high_value_genes
 
-def luhmes_analysis(dir: str, guide_path: str, gene_path: str):
-    """Create a function to give a quick summary of LUHMES results
+
+def analyze_output(
+    dir: str,
+    perturb_genes: Sequence[str],
+    background_genes: Sequence[str],
+):
+    """
+    Produce results from output files.
+
     Args:
         dir: Results directory
-        guide_path: Guide file path (csv)
-        gene_path: Gene symbol path (csv)
+        perturb_genes: List of perturbed gene symbols (e.g. 14 genes)
+        background_genes: List of background gene symbols (e.g. ~6000 genes)
     """
+
+    perturb_genes = list(perturb_genes)
+    background_genes = list(background_genes)
+
     params_path = f"{dir}/params_file.pkl"
     pip_path = f"{dir}/pip.txt"
     W_path = f"{dir}/W.txt"
@@ -299,12 +311,13 @@ def luhmes_analysis(dir: str, guide_path: str, gene_path: str):
     beta_path = f"{dir}/beta_target.csv"
     overall_path = f"{dir}/overall_effect.csv"
 
+    # For Luhmes
     # guide_path = "luhmes_G.csv"
     # gene_path = "luhmes_gene_symbol_v2.csv"
-    G = pd.read_csv(guide_path, index_col=0)
-    G_reduce = G.drop(columns=["Nontargeting"])
-    perturbed = G_reduce.columns.to_list()  # 14 genes perturbed
-    genes = pd.read_csv(gene_path, header=None)[0].to_list()  # 6000 gene symbols (background genes)
+    # G = pd.read_csv(guide_path, index_col=0)
+    # G_reduce = G.drop(columns=["Nontargeting"])
+    # perturbed = G_reduce.columns.to_list()  # 14 genes perturbed
+    # genes = pd.read_csv(gene_path, header=None)[0].to_list()  # 6000 gene symbols (background genes)
 
     with open(params_path, "rb") as file:
         params = pickle.load(file)
@@ -323,7 +336,7 @@ def luhmes_analysis(dir: str, guide_path: str, gene_path: str):
     overall_effect = beta_sparse @ params.W
 
     # pip_df = pd.DataFrame(pip.T, columns=column_names_w)
-    pip_df = pd.DataFrame(pip.T, columns=column_names_w, index=genes)
+    pip_df = pd.DataFrame(pip.T, columns=column_names_w, index=background_genes)
     pip_df.to_csv(pip_df_path)
     
     analysis = pip_analysis(jnp.asarray(pip).astype(jnp.float32),rho=0.90,rho_prime=0.10)
@@ -339,8 +352,8 @@ def luhmes_analysis(dir: str, guide_path: str, gene_path: str):
     if skip_lfsr:
         print("\nlfsr.csv exists. skipping lfsr compute...")
         lfsr_df = pd.read_csv(lfsr_path, index_col=0)
-        lfsr_df.index = pd.Index(genes)
-        lfsr_df.columns = perturbed
+        lfsr_df.index = pd.Index(background_genes)
+        lfsr_df.columns = perturb_genes
         lfsr_df.to_csv(lfsr_path)
     else:
         print("\ncomputing lfsr...")
@@ -348,7 +361,7 @@ def luhmes_analysis(dir: str, guide_path: str, gene_path: str):
         lfsr.block_until_ready()
         lfsr_np = np.array(lfsr)
         # lfsr_df = pd.DataFrame(lfsr_np.T)
-        lfsr_df = pd.DataFrame(lfsr_np.T, index=genes, columns=perturbed)
+        lfsr_df = pd.DataFrame(lfsr_np.T, index=background_genes, columns=perturb_genes)
         lfsr_df.to_csv(lfsr_path)
 
     # number of degs per w from PIP (find top genes with high pip)
@@ -368,15 +381,15 @@ def luhmes_analysis(dir: str, guide_path: str, gene_path: str):
         print(f"Saved {len(sig_genes)} sig. genes for {col} (LFSR < 0.05) in {dir}/lfsr.")
 
     # p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b)
-    p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b, index=perturbed)
+    p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b, index=perturb_genes)
     p_hat_df.to_csv(p_hat_path)
         
     # beta_df = pd.DataFrame(beta_sparse, columns=column_names_b)
-    beta_df = pd.DataFrame(beta_sparse, columns=column_names_b, index=perturbed)
+    beta_df = pd.DataFrame(beta_sparse, columns=column_names_b, index=perturb_genes)
     beta_df.to_csv(beta_path)
 
     # overall_df = pd.DataFrame(overall_effect.T)
-    overall_df = pd.DataFrame(overall_effect.T, columns=perturbed, index=genes)
+    overall_df = pd.DataFrame(overall_effect.T, columns=perturb_genes, index=background_genes)
     overall_df.to_csv(overall_path)
 
     print("\nshape of W df", W.shape)
