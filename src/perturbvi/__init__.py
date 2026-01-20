@@ -10,7 +10,7 @@ from .infer import (
 from .sim import generate_sim as generate_sim
 from .utils import (
     compute_lfsr as compute_lfsr,
-    luhmes_analysis as luhmes_analysis,
+    analyze_output as analyze_output,
 )
 from .io import save_results as save_results
 

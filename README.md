@@ -49,7 +49,7 @@ perturbvi luhmes_exp.csv luhmes_G.csv 12 400 800 -o=results --verbose
 
 This will save all the files (including `params.pkl`) in `results` folder.
 
-For luhmes results, we can analyze it:
+We can analyze results:
 ```python
 import perturbvi
 
@@ -58,17 +58,24 @@ gene_symbol_path = "luhmes_gene_symbol.csv"
 
 OUTPUT_DIR = "results"
 
-info = perturbvi.utils.luhmes_analysis(
+G = pd.read_csv(guide_path, index_col=0)
+G_reduce = G.drop(columns=["Nontargeting"])
+# 14 genes perturbed
+perturbed = G_reduce.columns.to_list()
+# 6000 gene symbols (background genes)
+genes = pd.read_csv(gene_path, header=None)[0].to_list()
+
+results = perturbvi.utils.analyze_output(
   OUTPUT_DIR, 
-  guide_path, 
-  gene_symbol_path
+  perturb_genes=perturbed, 
+  background_genes=genes
 )
 
 # number of degs per w from PIP
-print(info["num_deg_per_w"])
+print(results["num_deg_per_w"])
 
 # number of degs per perturbed gene from LFSR
-print(info["num_deg_per_perturbed_gene"])
+print(results["num_deg_per_perturbed_gene"])
 ```
 
 
