@@ -35,7 +35,7 @@ def _is_valid(X: sparse.JAXSparse):
     return jnp.all(jnp.isfinite(X.data))
 
 
-def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, params: ModelParams) -> ModelParams:
+def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, params: ModelParams, damping: float = 0.5) -> ModelParams:
     n_dim, p_dim = X.shape
 
     # calculate moments of factors and loadings
@@ -45,7 +45,8 @@ def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, para
     # expectation of log likelihood
     # tr(A @ B) == sum(A * B)
     E_ss = params.x_ssq - 2 * jnp.trace(mean_w @ (X.T @ mean_z)) + jnp.sum(mean_zz * mean_ww)
-    u_tau = (n_dim / E_ss) * p_dim
+    u_tau_new = (n_dim / E_ss) * p_dim
+    u_tau = damping * u_tau_new + (1 - damping) * params.tau
 
     return params._replace(tau=u_tau)
 

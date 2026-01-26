@@ -164,10 +164,11 @@ class LoadingModel(eqx.Module):
         return params
 
     @staticmethod
-    def update_hyperparam(params: ModelParams) -> ModelParams:
+    def update_hyperparam(params: ModelParams, damping: float = 0.5) -> ModelParams:
         est_varw = params.mean_w**2 + params.var_w[:, :, jnp.newaxis]
 
-        u_tau_0 = jnp.sum(params.alpha, axis=-1) / jnp.sum(est_varw * params.alpha, axis=-1)
+        u_tau_0_new = jnp.sum(params.alpha, axis=-1) / jnp.sum(est_varw * params.alpha, axis=-1)
+        u_tau_0 = damping * u_tau_0_new + (1 - damping) * params.tau_0
 
         return params._replace(tau_0=u_tau_0)
 

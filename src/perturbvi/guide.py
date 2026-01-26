@@ -150,9 +150,10 @@ class SparseGuideModel(GuideModel):
         return params
 
     @staticmethod
-    def update_hyperparam(params: ModelParams) -> ModelParams:
+    def update_hyperparam(params: ModelParams, damping: float = 0.5) -> ModelParams:
         est_var_beta = params.mean_beta**2 + params.var_beta
-        u_tau_beta = jnp.sum(params.p_hat, axis=-1) / jnp.sum(est_var_beta * params.p_hat.T, axis=0)
+        u_tau_beta_new = jnp.sum(params.p_hat, axis=-1) / jnp.sum(est_var_beta * params.p_hat.T, axis=0)
+        u_tau_beta = damping * u_tau_beta_new + (1 - damping) * params.tau_beta
 
         return params._replace(tau_beta=u_tau_beta)
 
