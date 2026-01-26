@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "perturbvi"
-version="0.2.2"
+version="0.2.3"
 description = 'Infer regulatory modules through informative latent component model in the single-cell Perturb-seq data'
 readme = "README.md"
 requires-python = ">=3.9"
