@@ -32,7 +32,18 @@ def _update_sparse_beta(gdx, carry):
     mean_beta_g = ZrG[:, gdx] * var_beta_g
 
     eps = 1e-8
-    p_hat_g = nn.sigmoid(logit(params.p[gdx]) + 0.5 * (mean_beta_g**2) / var_beta_g)
+    
+    log_prior_odds = logit(params.p[gdx])
+    log_bf = 0.5 * (jnp.log(var_beta_g) + jnp.log(params.tau_beta) + (mean_beta_g**2) / var_beta_g)
+    p_hat_g = nn.sigmoid(log_prior_odds + log_bf)
+
+    # === DEBUG START ===
+    p_hat_v2 = nn.sigmoid(logit(params.p[gdx]) + 0.5 * (mean_beta_g**2) / var_beta_g)
+    jax.debug.print("p_hat V2 mean: {}", jnp.mean(p_hat_v2))
+    jax.debug.print("p_hat V1 mean: {}", jnp.mean(p_hat_g))
+    jax.debug.print("V1 == V2: {}", jnp.allclose(p_hat_g, p_hat_v2))
+    # === DEBUG END ===
+
     p_hat_g = jnp.clip(p_hat_g, eps, 1 - eps)
 
     # residualize based on newest estimates for downstream inf

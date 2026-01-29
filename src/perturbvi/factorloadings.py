@@ -2,7 +2,6 @@ from typing import NamedTuple
 
 import equinox as eqx
 
-import jax
 from jax import lax as lax, nn as nn, numpy as jnp
 from jaxtyping import Array
 
