@@ -177,12 +177,9 @@ class LoadingModel(eqx.Module):
         
         # === START ===
         # From the image
-        Ew2 = (params.mean_w**2 + params.var_w[:, :, None]) * params.alpha 
-        trace_var_from_formula = jnp.sum(Ew2, axis=(0, 2)) - jnp.sum((params.mean_w * params.alpha)**2, axis=(0, 2))
-
-        # term1 = (params.mean_w**2 + params.var_w[:, :, jnp.newaxis]) * params.alpha
-        # term2 = (params.mean_w * params.alpha)**2
-        # trace_var_from_formula = jnp.sum(term1 - term2, axis=(-1, 0))
+        term1 = (params.mean_w**2 + params.var_w[:, :, jnp.newaxis]) * params.alpha
+        term2 = (params.mean_w * params.alpha)**2
+        trace_var_from_formula = jnp.sum(term1 - term2, axis=(-1, 0))
         
         # v1
         trace_var_v1 = jnp.sum(
