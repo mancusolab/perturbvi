@@ -2,6 +2,7 @@ from typing import NamedTuple
 
 import equinox as eqx
 
+import jax
 from jax import lax as lax, nn as nn, numpy as jnp
 from jaxtyping import Array
 
@@ -173,6 +174,23 @@ class LoadingModel(eqx.Module):
 
     def moments(self, params: ModelParams) -> LoadingMoments:
         trace_var = jnp.sum(params.var_w[:, :, jnp.newaxis] * params.alpha, axis=(-1, 0))
+        
+        # === START ===
+        # From the image
+        term1 = (params.mean_w**2 + params.var_w[:, :, jnp.newaxis]) * params.alpha
+        term2 = (params.mean_w * params.alpha)**2
+        trace_var_from_formula = jnp.sum(term1 - term2, axis=(-1, 0))
+        
+        # v1
+        trace_var_v1 = jnp.sum(
+            params.var_w[:, :, jnp.newaxis] * params.alpha + (params.mean_w**2 * params.alpha * (1 - params.alpha)),
+            axis=(-1, 0),
+        )
+        
+        jax.debug.print("Image == V1: {}", jnp.allclose(trace_var_from_formula, trace_var_v1))
+        jax.debug.print("Image == V2: {}", jnp.allclose(trace_var_from_formula, trace_var))
+        # === END ===
+        
         mu_w = jnp.sum(params.mean_w * params.alpha, axis=0)
         moments_ = LoadingMoments(
             mean_w=mu_w,
