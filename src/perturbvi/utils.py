@@ -105,7 +105,9 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
     initial_carry = 0, W, Z, Z_zero
 
     _, W, Z, _ = lax.while_loop(_condition, _step, initial_carry)
+    print("Z before QR:", jnp.linalg.norm(Z, axis=0))
     Z, _ = jnp.linalg.qr(Z)
+    print("Z after QR:", jnp.linalg.norm(Z, axis=0))
 
     return Z, W
 

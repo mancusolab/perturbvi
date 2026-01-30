@@ -252,7 +252,9 @@ def _init_params(
 
     # Factors
     if init == "pca":
-        init_mu_z, _ = prob_pca(svd_key, X, k=z_dim)
+        init_mu_z, W_pca = prob_pca(svd_key, X, k=z_dim)
+        print("prob_pca Z norms:", jnp.linalg.norm(init_mu_z, axis=0))
+        print("prob_pca W norms:", jnp.linalg.norm(W_pca, axis=1))
     else:
         init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
     init_mu_z.block_until_ready()
