@@ -404,7 +404,6 @@ def infer(
     A: Optional[ArrayLike | sparse.JAXSparse] = None,
     p_prior: Optional[float] = 0.5,
     tau: float = 1.0,
-    center: bool = True,
     standardize: bool = False,
     init: _init_type = "pca",
     learning_rate: float = 1e-2,
@@ -435,9 +434,6 @@ def infer(
 
     -`standardize` [`bool`]: Whether to scale the input data with variance 1 (default = False)
 
-    -`center` [`bool`]: Whether to mean-center the input data (default = True). 
-        Set to False if data is already centered to reduce memory usage.
-
     -`init` [`str`]: How to initialize the variational mean parameters for latent factors.
         Either "pca" or "random" (default = "pca").
 
@@ -462,8 +458,7 @@ def infer(
 
     # cast to jax array
     if isinstance(X, Array):
-        if center:
-            X -= jnp.mean(X, axis=0)
+        X -= jnp.mean(X, axis=0)
         if standardize:
             X /= jnp.std(X, axis=0)
     elif isinstance(X, sparse.JAXSparse):
