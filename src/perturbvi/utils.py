@@ -4,6 +4,7 @@ from functools import partial
 import pandas as pd
 import numpy as np
 import pickle
+import logging
 import os
 
 import equinox as eqx
@@ -13,6 +14,10 @@ import lineax as lx
 from jax import jit, lax, numpy as jnp, random as rdm
 from jaxtyping import Array
 from typing import Sequence
+from .log import get_logger
+
+log = get_logger("perturbvi")
+log.setLevel(logging.INFO)
 
 multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
 
@@ -200,7 +205,7 @@ def compute_lfsr(key, params, iters=2000):
         iters: Number of iterations (default=2000)
     """
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"Start computing LFSR at {current_time}")
+    log.info(f"Start computing LFSR at {current_time}")
 
     # Split computation into chunks to show progress
     chunk_size = 100
@@ -221,7 +226,7 @@ def compute_lfsr(key, params, iters=2000):
             neg_chunk += neg
         total_pos += pos_chunk
         total_neg += neg_chunk
-        print(f"Completed {(i + 1) * chunk_size}/{iters} iterations")
+        log.info(f"Completed {(i + 1) * chunk_size}/{iters} iterations")
 
     # Handle remaining iterations if any
     if remaining > 0:
@@ -234,13 +239,13 @@ def compute_lfsr(key, params, iters=2000):
             neg_rem += neg
         total_pos += pos_rem
         total_neg += neg_rem
-        print(f"Completed {iters}/{iters} iterations")
+        log.info(f"Completed {iters}/{iters} iterations")
 
     # Compute final LFSR
     lfsr = jnp.minimum(total_pos, total_neg) / iters
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"Finished computing LFSR at {current_time}")
+    log.info(f"Finished computing LFSR at {current_time}")
 
     return lfsr
 
@@ -256,11 +261,11 @@ def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
     z_dim, p_dim = pip.shape
     results = []
 
-    print(f"Of {p_dim} features from the data, SuSiE PCA identifies:")
+    log.info(f"Of {p_dim} features from the data, SuSiE PCA identifies:")
     for k in range(z_dim):
         num_signal = jnp.where(pip[k, :] >= rho)[0].shape[0]
         num_zero = jnp.where(pip[k, :] < rho_prime)[0].shape[0]
-        print(f"Component {k} has {num_signal} features with pip>{rho}; and {num_zero} features with pip<{rho_prime}")
+        log.info(f"Component {k} has {num_signal} features with pip>{rho}; and {num_zero} features with pip<{rho_prime}")
         results.append([num_signal, num_zero])
 
     df = pd.DataFrame(results, columns=["num_signal", "num_zero"])
@@ -271,8 +276,8 @@ def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
     mean_zero = df["num_zero"].mean()
     std_zero = df["num_zero"].std()
 
-    print(f"Mean and standard deviation for num_signal: {mean_signal}, {std_signal}")
-    print(f"Mean and standard deviation for num_zero: {mean_zero}, {std_zero}")
+    log.info(f"Mean and standard deviation for num_signal: {mean_signal}, {std_signal}")
+    log.info(f"Mean and standard deviation for num_zero: {mean_zero}, {std_zero}")
 
     return df
 
@@ -328,7 +333,7 @@ def analyze_output(
     z_dim, p_dim = params.W.shape
     g_dim, z_dim = params.mean_beta.shape
     n_dim, z_dim = params.mean_z.shape
-    print(f"Dims: z_dim={z_dim}, p_dim={p_dim}, g_dim={g_dim}, n_dim={n_dim}\n")
+    log.info(f"Dims: z_dim={z_dim}, p_dim={p_dim}, g_dim={g_dim}, n_dim={n_dim}\n")
     column_names_b = [f"b{i}" for i in range(z_dim)]
     column_names_w = [f"w{i}" for i in range(z_dim)]
 
@@ -346,17 +351,17 @@ def analyze_output(
         if not os.path.exists(f"{dir}/pip"):
             os.makedirs(f"{dir}/pip")
         np.savetxt(f"{dir}/pip/{col}_sig_genes.txt", sig_genes, fmt="%s")
-        print(f"Saved {len(sig_genes)} sig. genes for {col} (PIP > 0.9) in {dir}/pip/{col}_sig_genes.txt")
+        log.info(f"Saved {len(sig_genes)} sig. genes for {col} (PIP > 0.9) in {dir}/pip/{col}_sig_genes.txt")
     skip_lfsr = os.path.exists(lfsr_path)
 
     if skip_lfsr:
-        print("\nlfsr.csv exists. skipping lfsr compute...")
+        log.info("\nlfsr.csv exists. skipping lfsr compute...")
         lfsr_df = pd.read_csv(lfsr_path, index_col=0)
         lfsr_df.index = pd.Index(background_genes)
         lfsr_df.columns = perturb_genes
         lfsr_df.to_csv(lfsr_path)
     else:
-        print("\ncomputing lfsr...")
+        log.info("\ncomputing lfsr...")
         lfsr = compute_lfsr(key=rdm.PRNGKey(0), params=params, iters=2000)
         lfsr.block_until_ready()
         lfsr_np = np.array(lfsr)
@@ -378,7 +383,7 @@ def analyze_output(
         if not os.path.exists(f"{dir}/lfsr"):
             os.makedirs(f"{dir}/lfsr")
         np.savetxt(f"{dir}/lfsr/{col}_sig_genes.txt", sig_genes, fmt="%s")
-        print(f"Saved {len(sig_genes)} sig. genes for {col} (LFSR < 0.05) in {dir}/lfsr.")
+        log.info(f"Saved {len(sig_genes)} sig. genes for {col} (LFSR < 0.05) in {dir}/lfsr.")
 
     # p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b)
     p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b, index=perturb_genes)
@@ -392,17 +397,17 @@ def analyze_output(
     overall_df = pd.DataFrame(overall_effect.T, columns=perturb_genes, index=background_genes)
     overall_df.to_csv(overall_path)
 
-    print("\nshape of W df", W.shape)
-    print("shape of pip df", pip_df.shape)
-    print("shape of lfsr df", lfsr_df.shape)
-    print("shape of p_hat df", p_hat_df.shape)
-    print("shape of beta target df", beta_df.shape)
-    print("shape of overall effect df", overall_df.shape)
+    log.info("\nshape of W df", W.shape)
+    log.info("shape of pip df", pip_df.shape)
+    log.info("shape of lfsr df", lfsr_df.shape)
+    log.info("shape of p_hat df", p_hat_df.shape)
+    log.info("shape of beta target df", beta_df.shape)
+    log.info("shape of overall effect df", overall_df.shape)
 
-    print("\nDone!\n")
+    log.info("\nDone!\n")
 
-    print(f"To check significant DEGs per W, see {dir}/pip")
-    print(f"To check significant DEGs per perturbed gene, see {dir}/lfsr\n")
+    log.info(f"To check significant DEGs per W, see {dir}/pip")
+    log.info(f"To check significant DEGs per perturbed gene, see {dir}/lfsr\n")
 
     return {
         "params": params,

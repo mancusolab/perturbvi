@@ -3,9 +3,10 @@ import logging
 
 _log = logging.getLogger()
 
-def get_logger(name, path=None):
+def get_logger(name, path=None, level=logging.INFO):
     """get logger for perturbvi progress"""
     logger = logging.getLogger(name)
+    logger.setLevel(level)
     if not logger.handlers:
         # Prevent logging from propagating to the root logger
         logger.propagate = 0
