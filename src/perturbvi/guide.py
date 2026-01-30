@@ -1,4 +1,6 @@
 from abc import abstractmethod
+from dataclasses import field
+
 from plum import dispatch
 
 import equinox as eqx
@@ -100,7 +102,7 @@ def _update_dense_beta(G: SparseMatrix, params: ModelParams) -> ModelParams:
 
 class GuideModel(eqx.Module):
     guide_data: Array | SparseMatrix
-    gsq_diag: Array = eqx.field(static=True, init=False)
+    gsq_diag: Array = field(init=False)
 
     def __post_init__(self):
         self.gsq_diag = _get_diag(self.guide_data)  # type: ignore

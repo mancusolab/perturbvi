@@ -306,7 +306,7 @@ def _init_params(
     p_hat.block_until_ready()
     log.info("✓ Priors setup complete (100%)")
     
-    log.info("\n✓ Model parameter initialization completed successfully")
+    log.info("✓ Model parameter initialization completed successfully")
 
     return ModelParams(
         x_ssq,
