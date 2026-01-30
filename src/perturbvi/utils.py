@@ -333,7 +333,7 @@ def analyze_output(
     z_dim, p_dim = params.W.shape
     g_dim, z_dim = params.mean_beta.shape
     n_dim, z_dim = params.mean_z.shape
-    log.info(f"Dims: z_dim={z_dim}, p_dim={p_dim}, g_dim={g_dim}, n_dim={n_dim}\n")
+    log.info(f"Dims: z_dim={z_dim}, p_dim={p_dim}, g_dim={g_dim}, n_dim={n_dim}")
     column_names_b = [f"b{i}" for i in range(z_dim)]
     column_names_w = [f"w{i}" for i in range(z_dim)]
 
@@ -355,13 +355,13 @@ def analyze_output(
     skip_lfsr = os.path.exists(lfsr_path)
 
     if skip_lfsr:
-        log.info("\nlfsr.csv exists. skipping lfsr compute...")
+        log.info("lfsr.csv exists. skipping lfsr compute...")
         lfsr_df = pd.read_csv(lfsr_path, index_col=0)
         lfsr_df.index = pd.Index(background_genes)
         lfsr_df.columns = perturb_genes
         lfsr_df.to_csv(lfsr_path)
     else:
-        log.info("\ncomputing lfsr...")
+        log.info("computing lfsr...")
         lfsr = compute_lfsr(key=rdm.PRNGKey(0), params=params, iters=2000)
         lfsr.block_until_ready()
         lfsr_np = np.array(lfsr)
@@ -383,7 +383,7 @@ def analyze_output(
         if not os.path.exists(f"{dir}/lfsr"):
             os.makedirs(f"{dir}/lfsr")
         np.savetxt(f"{dir}/lfsr/{col}_sig_genes.txt", sig_genes, fmt="%s")
-        log.info(f"Saved {len(sig_genes)} sig. genes for {col} (LFSR < 0.05) in {dir}/lfsr.")
+        log.info(f"Saved {len(sig_genes)} sig. genes for {col} (LFSR < 0.05) in {dir}/lfsr")
 
     # p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b)
     p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b, index=perturb_genes)
@@ -397,17 +397,17 @@ def analyze_output(
     overall_df = pd.DataFrame(overall_effect.T, columns=perturb_genes, index=background_genes)
     overall_df.to_csv(overall_path)
 
-    log.info("\nshape of W df", W.shape)
+    log.info("shape of W df", W.shape)
     log.info("shape of pip df", pip_df.shape)
     log.info("shape of lfsr df", lfsr_df.shape)
     log.info("shape of p_hat df", p_hat_df.shape)
     log.info("shape of beta target df", beta_df.shape)
     log.info("shape of overall effect df", overall_df.shape)
 
-    log.info("\nDone!\n")
+    log.info("Done!")
 
     log.info(f"To check significant DEGs per W, see {dir}/pip")
-    log.info(f"To check significant DEGs per perturbed gene, see {dir}/lfsr\n")
+    log.info(f"To check significant DEGs per perturbed gene, see {dir}/lfsr")
 
     return {
         "params": params,

@@ -1,4 +1,5 @@
 import pickle
+import logging
 
 from typing import Optional, Tuple
 
@@ -10,7 +11,10 @@ import seaborn as sns
 from adjustText import adjust_text
 
 from .infer import InferResults
+from .log import get_logger
 
+log = get_logger("perturbvi")
+log.setLevel(logging.INFO)
 
 __all__ = ["save_results"]
 
@@ -26,7 +30,7 @@ def save_results(results: InferResults, path: str):
 
 
     """
-    print("Save results from SuSiE PCA")
+    log.info("Save results from SuSiE PCA")
 
     np.savetxt(f"{path}/W.txt", results.W)
     np.savetxt(f"{path}/pip.txt", results.pip)
@@ -36,7 +40,7 @@ def save_results(results: InferResults, path: str):
     pickle.dump(results.params, params_file)
     params_file.close()
 
-    print(f"Results saved successfully at {path}")
+    log.info(f"Results saved successfully at {path}")
 
     return
 
