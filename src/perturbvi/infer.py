@@ -252,9 +252,7 @@ def _init_params(
 
     # Factors
     if init == "pca":
-        init_mu_z, W_pca = prob_pca(svd_key, X, k=z_dim)
-        print("prob_pca Z norms:", jnp.linalg.norm(init_mu_z, axis=0))
-        print("prob_pca W norms:", jnp.linalg.norm(W_pca, axis=1))
+        init_mu_z, _ = prob_pca(svd_key, X, k=z_dim)
     else:
         init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
     init_mu_z.block_until_ready()
@@ -498,6 +496,7 @@ def infer(
     elbo_res = None
     for idx in range(1, max_iter + 1):
         elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params)
+        print(f"Iter {idx} Z norms:", jnp.linalg.norm(params.mean_z, axis=0))
 
         if verbose:
             log.info(f"Iter [{idx}] | {elbo_res}")
