@@ -436,7 +436,7 @@ def infer(
     -`standardize` [`bool`]: Whether to scale the input data with variance 1 (default = False)
 
     -`center` [`bool`]: Whether to mean-center the input data (default = True). 
-        Set to False if data is already centered to avoid redundant computation and reduce memory usage.
+        Set to False if data is already centered to reduce memory usage.
 
     -`init` [`str`]: How to initialize the variational mean parameters for latent factors.
         Either "pca" or "random" (default = "pca").
