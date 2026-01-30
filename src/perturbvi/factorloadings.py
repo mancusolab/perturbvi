@@ -172,7 +172,10 @@ class LoadingModel(eqx.Module):
         return params._replace(tau_0=u_tau_0)
 
     def moments(self, params: ModelParams) -> LoadingMoments:
-        trace_var = jnp.sum(params.var_w[:, :, jnp.newaxis] * params.alpha, axis=(-1, 0))
+        term1 = (params.mean_w**2 + params.var_w[:, :, jnp.newaxis]) * params.alpha
+        term2 = (params.mean_w * params.alpha)**2
+        trace_var = jnp.sum(term1 - term2, axis=(-1, 0))
+
         mu_w = jnp.sum(params.mean_w * params.alpha, axis=0)
         moments_ = LoadingMoments(
             mean_w=mu_w,

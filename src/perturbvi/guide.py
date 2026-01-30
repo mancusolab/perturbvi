@@ -32,7 +32,9 @@ def _update_sparse_beta(gdx, carry):
     mean_beta_g = ZrG[:, gdx] * var_beta_g
 
     eps = 1e-8
-    p_hat_g = nn.sigmoid(logit(params.p[gdx]) + 0.5 * (mean_beta_g**2) / var_beta_g)
+    
+    log_bf = 0.5 * (jnp.log(var_beta_g) + jnp.log(params.tau_beta) + (mean_beta_g**2) / var_beta_g)
+    p_hat_g = nn.sigmoid(logit(params.p[gdx]) + log_bf)
     p_hat_g = jnp.clip(p_hat_g, eps, 1 - eps)
 
     # residualize based on newest estimates for downstream inf

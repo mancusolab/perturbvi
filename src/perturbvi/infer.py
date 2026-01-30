@@ -3,11 +3,10 @@ from typing import get_args, Literal, NamedTuple, Optional, Tuple
 from plum import dispatch
 
 import equinox as eqx
-import jax
 import optax
 import optimistix as optx
 
-from jax import jit, nn, numpy as jnp, random
+from jax import nn, numpy as jnp, random
 from jax.experimental import sparse
 from jaxtyping import Array, ArrayLike
 
@@ -20,7 +19,12 @@ from .factorloadings import FactorModel, LoadingModel
 from .guide import DenseGuideModel, GuideModel, SparseGuideModel
 from .sparse import CenteredSparseMatrix, SparseMatrix
 from .utils import prob_pca
+from .log import get_logger
 
+import logging
+
+log = get_logger("perturbvi")
+log.setLevel(logging.INFO)
 
 _init_type = Literal["pca", "random"]
 
@@ -227,24 +231,24 @@ def _init_params(
     tau: float = 1.0,
     init: _init_type = "pca",
 ) -> ModelParams:
-    print("Starting model parameter initialization...")
+    log.info("Starting model parameter initialization...")
     
     # Base parameters
     n_dim, p_dim = X.shape
     tau_0 = jnp.ones((l_dim, z_dim))
     tau_0.block_until_ready()
-    print("✓ Base parameters initialized (5%)")
+    log.info("✓ Base parameters initialized (5%)")
 
     # Random keys
     keys = random.split(rng_key, 10)
     keys[0].block_until_ready()
     rng_key, svd_key, mu_key, var_key, muw_key, varw_key, alpha_key, beta_key, var_beta_key, theta_key = keys
-    print("✓ Random keys setup (10%)")
+    log.info("✓ Random keys setup (10%)")
 
     # Data statistics
     x_ssq = jnp.sum(X * X)
     x_ssq.block_until_ready()
-    print("✓ Data statistics computed (15%)")
+    log.info("✓ Data statistics computed (15%)")
 
     # Factors
     if init == "pca":
@@ -252,25 +256,25 @@ def _init_params(
     else:
         init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
     init_mu_z.block_until_ready()
-    print("✓ Factors initialized (35%)")
+    log.info("✓ Factors initialized (35%)")
 
     # Factor variance
     init_var_z = jnp.diag(random.normal(var_key, shape=(z_dim,)) ** 2)
     init_var_z.block_until_ready()
-    print("✓ Factor variance set (45%)")
+    log.info("✓ Factor variance set (45%)")
 
     # Loadings
     init_mu_w = random.normal(muw_key, shape=(l_dim, z_dim, p_dim)) * 1e-3
     init_var_w = (1 / tau_0) * (random.normal(varw_key, shape=(l_dim, z_dim))) ** 2
     init_mu_w.block_until_ready()
     init_var_w.block_until_ready()
-    print("✓ Loadings initialized (60%)")
+    log.info("✓ Loadings initialized (60%)")
 
     # Alpha and pi
     #init_alpha = random.dirichlet(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
     #init_alpha =jax.jit(random.dirichlet)(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
     init_alpha = jnp.full((l_dim, z_dim, p_dim), 1. / p_dim)
-    print("Avoid dirichlet process")
+    log.info("Avoid dirichlet process")
     init_alpha.block_until_ready()
     if isinstance(annotations, AnnotationPriorModel):
         p_dim, m = annotations.shape
@@ -282,7 +286,7 @@ def _init_params(
         theta = None
         pi = jnp.ones(shape=(z_dim, p_dim)) / p_dim
         pi.block_until_ready()
-    print("✓ Annotations setup complete (75%)")
+    log.info("✓ Annotations setup complete (75%)")
 
     # Perturbation effects
     n_dim, g_dim = guide.shape
@@ -292,7 +296,7 @@ def _init_params(
     tau_beta.block_until_ready()
     init_mu_beta.block_until_ready()
     init_var_beta.block_until_ready()
-    print("✓ Perturbation effects initialized (90%)")
+    log.info("✓ Perturbation effects initialized (90%)")
 
     # Priors
     if p_prior is not None:
@@ -300,9 +304,9 @@ def _init_params(
         p_prior.block_until_ready()
     p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
     p_hat.block_until_ready()
-    print("✓ Priors setup complete (100%)")
+    log.info("✓ Priors setup complete (100%)")
     
-    print("\n✓ Model parameter initialization completed successfully")
+    log.info("✓ Model parameter initialization completed successfully")
 
     return ModelParams(
         x_ssq,
@@ -458,7 +462,6 @@ def infer(
 
     # cast to jax array
     if isinstance(X, Array):
-        # option to center the data
         X -= jnp.mean(X, axis=0)
         if standardize:
             X /= jnp.std(X, axis=0)
@@ -495,14 +498,14 @@ def infer(
         elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params)
 
         if verbose:
-            print(f"Iter [{idx}] | {elbo_res}")
+            log.info(f"Iter [{idx}] | {elbo_res}")
 
         diff = elbo_res.elbo - elbo
         if diff < 0 and verbose:
-            print(f"Alert! Diff between elbo[{idx - 1}] and elbo[{idx}] = {diff}")
+            log.info(f"Alert! Diff between elbo[{idx - 1}] and elbo[{idx}] = {diff}")
         if jnp.fabs(diff) < tol:
             if verbose:
-                print(f"Elbo diff tolerance reached at iteration {idx}")
+                log.info(f"Elbo diff tolerance reached at iteration {idx}")
             break
 
         elbo = elbo_res.elbo
