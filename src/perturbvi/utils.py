@@ -397,12 +397,12 @@ def analyze_output(
     overall_df = pd.DataFrame(overall_effect.T, columns=perturb_genes, index=background_genes)
     overall_df.to_csv(overall_path)
 
-    log.info("shape of W df", W.shape)
-    log.info("shape of pip df", pip_df.shape)
-    log.info("shape of lfsr df", lfsr_df.shape)
-    log.info("shape of p_hat df", p_hat_df.shape)
-    log.info("shape of beta target df", beta_df.shape)
-    log.info("shape of overall effect df", overall_df.shape)
+    log.info(f"shape of W df {W.shape}")
+    log.info(f"shape of pip df {pip_df.shape}")
+    log.info(f"shape of lfsr df {lfsr_df.shape}")
+    log.info(f"shape of p_hat df {p_hat_df.shape}")
+    log.info(f"shape of beta target df {beta_df.shape}")
+    log.info(f"shape of overall effect df {overall_df.shape}")
 
     log.info("Done!")
 
