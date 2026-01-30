@@ -361,7 +361,6 @@ def analyze_output(
         lfsr_df.columns = perturb_genes
         lfsr_df.to_csv(lfsr_path)
     else:
-        log.info("computing lfsr...")
         lfsr = compute_lfsr(key=rdm.PRNGKey(0), params=params, iters=2000)
         lfsr.block_until_ready()
         lfsr_np = np.array(lfsr)
