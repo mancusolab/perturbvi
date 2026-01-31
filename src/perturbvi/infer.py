@@ -274,7 +274,7 @@ def _init_params(
     #init_alpha = random.dirichlet(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
     #init_alpha =jax.jit(random.dirichlet)(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
     init_alpha = jnp.full((l_dim, z_dim, p_dim), 1. / p_dim)
-    log.info("Avoid dirichlet process")
+    #log.info("Avoid dirichlet process")
     init_alpha.block_until_ready()
     if isinstance(annotations, AnnotationPriorModel):
         p_dim, m = annotations.shape
@@ -496,7 +496,6 @@ def infer(
     elbo_res = None
     for idx in range(1, max_iter + 1):
         elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params)
-        print(f"Iter {idx} Z norms:", jnp.linalg.norm(params.mean_z, axis=0))
 
         if verbose:
             log.info(f"Iter [{idx}] | {elbo_res}")
