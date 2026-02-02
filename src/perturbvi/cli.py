@@ -1,20 +1,23 @@
-from pathlib import Path
 import argparse as ap
 import logging
-import sys
 import os
+import sys
 
-import scanpy as sc
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import scanpy as sc
 
 import jax
 import jax.numpy as jnp
+
 from jax.experimental import sparse
 
+from perturbvi import infer
 from perturbvi.io import save_results
 from perturbvi.log import get_logger
-from perturbvi import infer
+
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_default_matmul_precision", "highest")

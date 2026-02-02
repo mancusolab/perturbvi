@@ -1,11 +1,13 @@
-from datetime import datetime
-from functools import partial
-
-import pandas as pd
-import numpy as np
-import pickle
 import logging
 import os
+import pickle
+
+from datetime import datetime
+from functools import partial
+from typing import Sequence
+
+import numpy as np
+import pandas as pd
 
 import equinox as eqx
 import jax.scipy.special as jspec
@@ -13,8 +15,9 @@ import lineax as lx
 
 from jax import jit, lax, numpy as jnp, random as rdm
 from jaxtyping import Array
-from typing import Sequence
+
 from .log import get_logger
+
 
 log = get_logger("perturbvi")
 log.setLevel(logging.INFO)

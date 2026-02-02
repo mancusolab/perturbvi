@@ -9,7 +9,7 @@ def get_logger(name, path=None, level=logging.INFO):
     logger.setLevel(level)
     if not logger.handlers:
         # Prevent logging from propagating to the root logger
-        logger.propagate = 0
+        logger.propagate = False 
         console = logging.StreamHandler()
         logger.addHandler(console)
 

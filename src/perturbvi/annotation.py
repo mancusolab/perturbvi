@@ -20,7 +20,7 @@ def _compute_pi(A: DataMatrix, theta: Array) -> Array:
 def _loss(theta: Array, args) -> Array:
     A, alpha = args
     pi = _compute_pi(A, theta)
-    return kl_discrete(alpha, pi), None
+    return kl_discrete(alpha, pi), None # type: ignore
 
 
 class PriorModel(eqx.Module):
@@ -62,7 +62,7 @@ class AnnotationPriorModel(PriorModel):
         f_struct, aux_struct = jax.eval_shape(_loss, params.theta, args)
         return params._replace(
             ann_state=self.search.init(
-                _loss, params.theta, args, options=None, f_struct=f_struct, aux_struct=aux_struct, tags=None
+                _loss, params.theta, args, options=None, f_struct=f_struct, aux_struct=aux_struct, tags=None # type: ignore
             ),
         )
 

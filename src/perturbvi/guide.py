@@ -49,7 +49,7 @@ def _update_sparse_beta(gdx, carry):
 
 
 @dispatch
-def _get_diag(G: Array) -> Array:
+def _get_diag(G: Array) -> Array: # type: ignore
     return jnp.sum(G**2, axis=0)
 
 
@@ -59,7 +59,7 @@ def _get_diag(G: SparseMatrix) -> Array:
 
 
 @dispatch
-def _wgt_sumsq(G: SparseMatrix, vector: Array) -> Array:
+def _wgt_sumsq(G: SparseMatrix, vector: Array) -> Array: # type: ignore
     tmp = G.matrix * vector
     return jsparse.sparsify(jnp.sum)(tmp**2)  # type: ignore
 
@@ -74,7 +74,7 @@ _multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
 
 
 @dispatch
-def _update_dense_beta(G: Array, params: ModelParams) -> ModelParams:
+def _update_dense_beta(G: Array, params: ModelParams) -> ModelParams: # type: ignore
     # Create linear operator on G
     G_op = lx.MatrixLinearOperator(G)
 
@@ -135,7 +135,7 @@ class SparseGuideModel(GuideModel):
 
     def weighted_sumsq(self, params: ModelParams) -> Array:
         mean_bb = jnp.sum((params.mean_beta**2 + params.var_beta) * params.p_hat.T, axis=1)
-        return _wgt_sumsq(self.guide_data, jnp.sqrt(mean_bb))
+        return _wgt_sumsq(self.guide_data, jnp.sqrt(mean_bb)) # type: ignore
 
     def update(self, params: ModelParams) -> ModelParams:
         # compute E[Z'k]G: remove the g-th effect
@@ -182,7 +182,7 @@ class DenseGuideModel(GuideModel):
         return jnp.sum(pred_z**2)
 
     def update(self, params: ModelParams) -> ModelParams:
-        return _update_dense_beta(self.guide_data, params)
+        return _update_dense_beta(self.guide_data, params) # type: ignore
 
     @staticmethod
     def update_hyperparam(params: ModelParams) -> ModelParams:

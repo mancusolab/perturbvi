@@ -1,3 +1,5 @@
+import logging
+
 from typing import get_args, Literal, NamedTuple, Optional, Tuple
 
 from plum import dispatch
@@ -17,11 +19,10 @@ from .common import (
 )
 from .factorloadings import FactorModel, LoadingModel
 from .guide import DenseGuideModel, GuideModel, SparseGuideModel
+from .log import get_logger
 from .sparse import CenteredSparseMatrix, SparseMatrix
 from .utils import prob_pca
-from .log import get_logger
 
-import logging
 
 log = get_logger("perturbvi")
 log.setLevel(logging.INFO)
@@ -30,7 +31,7 @@ _init_type = Literal["pca", "random"]
 
 
 @dispatch
-def _is_valid(X: ArrayLike):
+def _is_valid(X: ArrayLike): # type: ignore
     return jnp.all(jnp.isfinite(X))
 
 
@@ -136,7 +137,7 @@ def compute_elbo(
 
     elbo = exp_logl - (kl_factors + kl_loadings + kl_guide)
 
-    result = ELBOResults(elbo, exp_logl, kl_factors, kl_loadings, kl_guide)
+    result = ELBOResults(elbo, exp_logl, kl_factors, kl_loadings, kl_guide) # type: ignore
 
     return result
 
@@ -155,15 +156,15 @@ def _inner_loop(
     params = annotation.update(params)
 
     # update loadings prior precision via ~Empirical Bayes and update variational params
-    params = loadings.update_hyperparam(params)
     params = loadings.update(X, factors, params)
+    params = loadings.update_hyperparam(params)
 
     # update factor parameters
     params = factors.update(X, guide, loadings, params)
 
     # update beta and p_hat
-    params = guide.update_hyperparam(params)
     params = guide.update(params)
+    params = guide.update_hyperparam(params)
 
     # update precision parameters via MLE
     params = _update_tau(X, factors, loadings, params)
@@ -205,7 +206,7 @@ def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelPa
         sorted_alpha,
         params.tau,
         sorted_tau_0,
-        sorted_theta,
+        sorted_theta, # type: ignore
         sorted_pi,
         None,
         sorted_mu_beta,
@@ -219,7 +220,7 @@ def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelPa
 
 
 def _init_params(
-    rng_key: random.PRNGKey,
+    rng_key: random.PRNGKey, # type: ignore
     z_dim: int,
     l_dim: int,
     X: DataMatrix,
@@ -246,7 +247,7 @@ def _init_params(
     log.info("✓ Random keys setup (10%)")
 
     # Data statistics
-    x_ssq = jnp.sum(X * X)
+    x_ssq = jnp.sum(X * X) # type: ignore
     x_ssq.block_until_ready()
     log.info("✓ Data statistics computed (15%)")
 
@@ -300,8 +301,8 @@ def _init_params(
 
     # Priors
     if p_prior is not None:
-        p_prior = p_prior * jnp.ones(g_dim)
-        p_prior.block_until_ready()
+        p_prior = p_prior * jnp.ones(g_dim) # type: ignore
+        p_prior.block_until_ready() # type: ignore
     p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
     p_hat.block_until_ready()
     log.info("✓ Priors setup complete (100%)")
@@ -317,13 +318,13 @@ def _init_params(
         init_alpha,
         jnp.array(tau, dtype=float),
         tau_0,
-        theta=theta,
+        theta=theta, # type: ignore
         pi=pi,
         ann_state=None,
         mean_beta=init_mu_beta,
         var_beta=init_var_beta,
         tau_beta=tau_beta,
-        p=p_prior,
+        p=p_prior, # type: ignore
         p_hat=p_hat,
     )
 
@@ -355,7 +356,7 @@ def _check_args(
     if z_dim <= 0:
         raise ValueError(f"z_dim should be positive: received z_dim = {z_dim}")
     # quality checks
-    if not _is_valid(X):
+    if not _is_valid(X): # type: ignore
         raise ValueError("X contains 'nan/inf'. Please check input data for correctness or missingness")
 
     if A is not None:
@@ -368,7 +369,7 @@ def _check_args(
             raise ValueError(
                 f"Leading dimension of annotation matrix A should match feature dimension {p_dim}: received {a_p_dim}"
             )
-        if not _is_valid(A):
+        if not _is_valid(A): # type: ignore
             raise ValueError("A contains 'nan/inf'. Please check input data for correctness or missingness")
     # type check for init
 
@@ -470,16 +471,16 @@ def infer(
     if isinstance(G, ArrayLike):
         G = jnp.asarray(G)
     elif isinstance(G, sparse.JAXSparse):
-        G = SparseMatrix(G)
+        G = SparseMatrix(G) # type: ignore
 
     if p_prior is None or jnp.isclose(p_prior, 0.0):
-        guide = DenseGuideModel(G)
+        guide = DenseGuideModel(G) # type: ignore
     else:
-        guide = SparseGuideModel(G)
+        guide = SparseGuideModel(G) # type: ignore
 
     if A is not None:
         adam = optax.adam(learning_rate)
-        annotation = AnnotationPriorModel(A, optx.OptaxMinimiser(adam, rtol=1e-3, atol=1e-3))
+        annotation = AnnotationPriorModel(A, optx.OptaxMinimiser(adam, rtol=1e-3, atol=1e-3)) # type: ignore
     else:
         annotation = FixedPrior()
 
@@ -489,13 +490,13 @@ def infer(
     rng_key = random.PRNGKey(seed)
     factors = FactorModel()
     loadings = LoadingModel()
-    params = _init_params(rng_key, z_dim, l_dim, X, guide, factors, loadings, annotation, p_prior, tau, init)
+    params = _init_params(rng_key, z_dim, l_dim, X, guide, factors, loadings, annotation, p_prior, tau, init) # type: ignore
 
     #  core loop for inference
     elbo = -5e25
     elbo_res = None
     for idx in range(1, max_iter + 1):
-        elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params)
+        elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params) # type: ignore
 
         if verbose:
             log.info(f"Iter [{idx}] | {elbo_res}")
@@ -517,7 +518,7 @@ def infer(
     # compute PIPs
     pip = compute_pip(params)
 
-    return InferResults(params, elbo_res, pve, pip)
+    return InferResults(params, elbo_res, pve, pip) # type: ignore
 
 
 def compute_pip(params: ModelParams) -> Array:

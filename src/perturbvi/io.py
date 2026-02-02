@@ -185,7 +185,7 @@ def plot_beta(
     # Use numeric indices for plotting
     plt.scatter(numeric_indices, df[column], color="grey", alpha=0.7)
     plt.scatter(
-        [numeric_indices[df.index.get_loc(i)] for i in top_indices], df.loc[top_indices, column], color="red", zorder=5
+        [numeric_indices[df.index.get_loc(i)] for i in top_indices], df.loc[top_indices, column], color="red", zorder=5 # type: ignore
     )
 
     plt.axhline(y=top_value, color="green", linestyle="--")
@@ -194,11 +194,11 @@ def plot_beta(
 
     texts = []
     for index in top_indices:
-        x_pos = numeric_indices[df.index.get_loc(index)]
+        x_pos = numeric_indices[df.index.get_loc(index)] # type: ignore
         y_pos = df.loc[index, column]
         # Use perturbation name if provided, otherwise use index
         label = str(index)
-        texts.append(plt.text(x_pos, y_pos, label, fontsize=fontsize, color="red"))
+        texts.append(plt.text(x_pos, y_pos, label, fontsize=fontsize, color="red")) # type: ignore
 
     adjust_text(texts, arrowprops=dict(arrowstyle="-", color="red"))
 

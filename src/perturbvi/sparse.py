@@ -42,7 +42,7 @@ def _get_dense_var(geno: sparse.JAXSparse, dense_dtype: JAXType):
     #     return _, var_idx
     #
     # _, var_geno = lax.scan(_inner, 0.0, geno.T)
-    var_geno = _sparse_mean(geno**2, axis=0, dtype=dense_dtype) - _sparse_mean(geno, axis=0, dtype=dense_dtype) ** 2
+    var_geno = _sparse_mean(geno**2, axis=0, dtype=dense_dtype) - _sparse_mean(geno, axis=0, dtype=dense_dtype) ** 2 # type: ignore
 
     return var_geno.todense()
 
@@ -60,36 +60,36 @@ class SparseMatrix(lx.AbstractLinearOperator):
         return jax.vmap(self.mv, (1,), 1)(matrix)
 
     @dispatch
-    def __matmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
+    def __matmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator: # type: ignore
         return self.matrix @ other
 
     @dispatch
-    def __matmul__(self, vector: Num[ArrayLike, " p"]) -> Float[Array, " n"]:
+    def __matmul__(self, vector: Num[ArrayLike, " p"]) -> Float[Array, " n"]: # type: ignore
         return self.mv(vector)
 
     @dispatch
-    def __matmul__(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "p k"]:
+    def __matmul__(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "p k"]: # type: ignore
         return self.mm(matrix)
 
     @dispatch
-    def __rmatmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
+    def __rmatmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator: # type: ignore
         return other @ self.matrix
 
     @dispatch
-    def __rmatmul__(self, vector: Num[ArrayLike, " n"]) -> Float[Array, " p"]:
+    def __rmatmul__(self, vector: Num[ArrayLike, " n"]) -> Float[Array, " p"]: # type: ignore
         return self.T.mv(jnp.asarray(vector).T).T
 
     @dispatch
     def __rmatmul__(self, matrix: Num[ArrayLike, "k n"]) -> Float[Array, "k p"]:
-        return self.T.mm(jnp.asarray(matrix).T).T
+        return self.T.mm(jnp.asarray(matrix).T).T # type: ignore
 
     def as_matrix(self) -> Float[Array, "n p"]:
         # raise ValueError("Refusing to materialise sparse matrix.")
         # Or you could do:
-        return self.matrix.todense()
+        return self.matrix.todense() # type: ignore
 
     def transpose(self) -> "SparseMatrix":
-        return SparseMatrix(self.matrix.T)
+        return SparseMatrix(self.matrix.T) # type: ignore
 
     def in_structure(self) -> jax.ShapeDtypeStruct:
         _, in_size = self.matrix.shape
@@ -111,7 +111,7 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
     data: lx.AbstractLinearOperator
 
     @dispatch
-    def __init__(self, data: lx.AbstractLinearOperator):
+    def __init__(self, data: lx.AbstractLinearOperator): # type: ignore
         self.data = data
 
     @dispatch
@@ -127,12 +127,12 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
 
         if covar is None:
             covar = jnp.ones((n, 1), dtype=dtype)
-            beta = _sparse_mean(matrix, axis=0, dtype=dtype).todense()
+            beta = _sparse_mean(matrix, axis=0, dtype=dtype).todense() # type: ignore
             beta = beta.reshape((1, p))
         else:
             beta = _get_mean_terms(matrix, covar)
 
-        center_op = lx.MatrixLinearOperator(covar) @ lx.MatrixLinearOperator(beta)
+        center_op = lx.MatrixLinearOperator(covar) @ lx.MatrixLinearOperator(beta) # type: ignore
 
         if scale:
             wgt = jnp.sqrt(_get_dense_var(matrix, dtype))
@@ -152,34 +152,34 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
         return jax.vmap(self.data.mv, (1,), 1)(jnp.asarray(matrix))
 
     @dispatch
-    def __matmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
+    def __matmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator: # type: ignore
         return self.data @ other
 
     @dispatch
-    def __matmul__(self, vector: Num[ArrayLike, " p"]) -> Float[Array, " n"]:
+    def __matmul__(self, vector: Num[ArrayLike, " p"]) -> Float[Array, " n"]: # type: ignore
         return self.mv(vector)
 
     @dispatch
-    def __matmul__(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "p k"]:
+    def __matmul__(self, matrix: Num[ArrayLike, "p k"]) -> Float[Array, "p k"]: # type: ignore
         return self.mm(matrix)
 
     @dispatch
-    def __rmatmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
+    def __rmatmul__(self, other: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator: # type: ignore
         return other @ self.data
 
     @dispatch
-    def __rmatmul__(self, vector: Num[ArrayLike, " n"]) -> Float[Array, " p"]:
+    def __rmatmul__(self, vector: Num[ArrayLike, " n"]) -> Float[Array, " p"]: # type: ignore
         return self.T.mv(jnp.asarray(vector).T).T
 
     @dispatch
     def __rmatmul__(self, matrix: Num[ArrayLike, "k n"]) -> Float[Array, "k p"]:
-        return self.T.mm(jnp.asarray(matrix).T).T
+        return self.T.mm(jnp.asarray(matrix).T).T # type: ignore
 
     def as_matrix(self) -> Float[Array, "n p"]:
         return self.data.as_matrix()
 
     def transpose(self) -> "CenteredSparseMatrix":
-        return CenteredSparseMatrix(self.data.T)
+        return CenteredSparseMatrix(self.data.T) # type: ignore
 
     @property
     def shape(self):
