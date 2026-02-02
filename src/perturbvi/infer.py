@@ -498,6 +498,17 @@ def infer(
     for idx in range(1, max_iter + 1):
         elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params) # type: ignore
 
+        # ===== DIAGNOSTICS =====
+        if idx % 50 == 1 or idx <= 5:  # Log first 5 iters, then every 50
+            log.info(f"=== Diagnostics at iter {idx} ===")
+            log.info(f"tau_beta: min={params.tau_beta.min():.4f}, max={params.tau_beta.max():.4f}, mean={params.tau_beta.mean():.4f}")
+            log.info(f"p_hat: min={params.p_hat.min():.6f}, max={params.p_hat.max():.6f}, mean={params.p_hat.mean():.6f}")
+            log.info(f"p_hat near zero (<0.01): {(params.p_hat < 0.01).sum()} / {params.p_hat.size}")
+            log.info(f"p_hat near one (>0.99): {(params.p_hat > 0.99).sum()} / {params.p_hat.size}")
+            log.info(f"var_beta: min={params.var_beta.min():.6f}, max={params.var_beta.max():.6f}")
+            log.info(f"mean_beta: min={params.mean_beta.min():.4f}, max={params.mean_beta.max():.4f}")
+        # ===== END DIAGNOSTICS =====
+
         if verbose:
             log.info(f"Iter [{idx}] | {elbo_res}")
 
