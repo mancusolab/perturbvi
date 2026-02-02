@@ -11,7 +11,7 @@ import jax.nn as nn
 import jax.numpy as jnp
 import lineax as lx
 
-from jax.scipy.special import logit
+from jax.scipy.special import logit, xlogy
 from jaxtyping import Array
 
 from .common import ModelParams
@@ -168,8 +168,13 @@ class SparseGuideModel(GuideModel):
         # sum them up, weighted by posterior prob of having an effect
         kl_beta = jnp.sum(params.p_hat.T * kl_beta)
 
+        p_hat = params.p_hat
+        p = params.p
+        term1 = xlogy(p_hat, p_hat) - xlogy(p_hat, p)
+        term2 = xlogy(1 - p_hat, 1 - p_hat) - xlogy(1 - p_hat, 1 - p)
+        kl_eta = jnp.sum(term1 + term2)
         # KL for eta selection variables
-        kl_eta = kl_discrete(params.p_hat, params.p)
+        # kl_eta = kl_discrete(params.p_hat, params.p)
         return kl_beta + kl_eta
 
 
