@@ -144,7 +144,7 @@ class SparseGuideModel(GuideModel):
         pred = self.predict(params)
         ZrG = (params.mean_z - pred).T @ self.guide_data
 
-        _, g_dim = params.mean_beta.shape
+        g_dim, _ = params.mean_beta.shape
         _, _, params = lax.fori_loop(0, g_dim, _update_sparse_beta, (ZrG, self.gsq_diag, params))
 
         return params
