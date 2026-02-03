@@ -111,6 +111,12 @@ def compute_elbo(
     # E[Z'Z] = V_k[Z] * tr(I_n) + E[Z]'E[Z] = V_k[Z] * n + E[Z]'E[Z]
     mean_z, mean_zz = factors.moments(params)
 
+    ## diagnostics
+    E_zzk_diag = jnp.diag(mean_zz)
+    log.info(f"diagonal: {E_zzk_diag}")
+    collapsed = E_zzk_diag < 1.0
+    log.info(f"Collapsed factors (E[Z'Z]_kk < 1): {jnp.where(collapsed)[0]}")
+
     # calculate moment of W
     mean_w, mean_ww = loadings.moments(params)
 
