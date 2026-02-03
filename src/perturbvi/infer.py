@@ -111,12 +111,6 @@ def compute_elbo(
     # E[Z'Z] = V_k[Z] * tr(I_n) + E[Z]'E[Z] = V_k[Z] * n + E[Z]'E[Z]
     mean_z, mean_zz = factors.moments(params)
 
-    ## diagnostics
-    E_zzk_diag = jnp.diag(mean_zz)
-    log.info(f"diagonal: {E_zzk_diag}")
-    collapsed = E_zzk_diag < 1.0
-    log.info(f"Collapsed factors (E[Z'Z]_kk < 1): {jnp.where(collapsed)[0]}")
-
     # calculate moment of W
     mean_w, mean_ww = loadings.moments(params)
 
@@ -504,7 +498,7 @@ def infer(
     for idx in range(1, max_iter + 1):
         elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params) # type: ignore
 
-        # === PVE-related diagnostics ===
+        # === diagnostics ===
         if idx % 50 == 1 or idx <= 5:
             W = params.W 
             log.info(f"W shape: {W.shape}")
@@ -517,6 +511,13 @@ def infer(
             log.info(f"mean_z norm per factor: {z_norm_per_factor}")
             
             log.info(f"tau: {params.tau}")
+
+            mean_zz = params.mean_z.T @ params.mean_z + params.n_dim * params.var_z
+            E_zzk_diag = jnp.diag(mean_zz)
+            log.info(f"E[Z'Z] diagonal: {E_zzk_diag}")
+            
+            collapsed_count = jnp.sum(E_zzk_diag < 1.0)
+            log.info(f"Num of collapsed factors (E[Z'Z]_kk < 1): {collapsed_count}")
 
         if verbose:
             log.info(f"Iter [{idx}] | {elbo_res}")
