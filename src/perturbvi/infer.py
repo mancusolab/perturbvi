@@ -498,27 +498,6 @@ def infer(
     for idx in range(1, max_iter + 1):
         elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params) # type: ignore
 
-        # === diagnostics ===
-        if idx % 50 == 1 or idx <= 5:
-            W = params.W 
-            log.info(f"W shape: {W.shape}")
-            log.info(f"W per factor norm: {[f'{jnp.linalg.norm(W[k]):.4f}' for k in range(params.z_dim)]}")
-            
-            alpha_max_per_factor = params.alpha.max(axis=(0, 2))
-            log.info(f"alpha max per factor: {alpha_max_per_factor}")
-            
-            z_norm_per_factor = jnp.linalg.norm(params.mean_z, axis=0)
-            log.info(f"mean_z norm per factor: {z_norm_per_factor}")
-            
-            log.info(f"tau: {params.tau}")
-
-            mean_zz = params.mean_z.T @ params.mean_z + params.n_dim * params.var_z
-            E_zzk_diag = jnp.diag(mean_zz)
-            log.info(f"E[Z'Z] diagonal: {E_zzk_diag}")
-            
-            collapsed_count = jnp.sum(E_zzk_diag < 1.0)
-            log.info(f"Num of collapsed factors (E[Z'Z]_kk < 1): {collapsed_count}")
-
         if verbose:
             log.info(f"Iter [{idx}] | {elbo_res}")
 
