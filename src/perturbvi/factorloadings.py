@@ -1,6 +1,9 @@
+# pattern: Functional Core
+
 from typing import NamedTuple
 
 import equinox as eqx
+import jax.scipy.linalg as jsp_linalg
 
 from jax import lax as lax, nn as nn, numpy as jnp
 from jaxtyping import Array
@@ -26,8 +29,12 @@ class FactorModel(eqx.Module):
         mean_w, mean_ww = loadings.moments(params)
         z_dim = params.z_dim
 
-        update_var_z = jnp.linalg.inv(params.tau * mean_ww + jnp.identity(z_dim))
-        update_mu_z = (params.tau * (data @ mean_w.T) + guide.predict(params)) @ update_var_z
+        precision_z = params.tau * mean_ww + jnp.eye(z_dim, dtype=mean_ww.dtype)
+        chol_precision_z = jnp.linalg.cholesky(precision_z)
+        update_var_z = jsp_linalg.cho_solve((chol_precision_z, True), jnp.eye(z_dim, dtype=precision_z.dtype))
+
+        rhs = params.tau * (data @ mean_w.T) + guide.predict(params)
+        update_mu_z = jsp_linalg.cho_solve((chol_precision_z, True), rhs.T).T
 
         return params._replace(
             mean_z=update_mu_z,

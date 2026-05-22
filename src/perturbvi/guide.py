@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 from abc import abstractmethod
 from dataclasses import field
 
@@ -16,7 +18,7 @@ from jaxtyping import Array
 
 from .common import ModelParams
 from .sparse import SparseMatrix
-from .utils import kl_discrete
+from .utils import kl_bernoulli
 
 
 def _update_sparse_beta(gdx, carry):
@@ -168,12 +170,20 @@ class SparseGuideModel(GuideModel):
         # sum them up, weighted by posterior prob of having an effect
         kl_beta = jnp.sum(params.p_hat.T * kl_beta)
 
-        # KL for eta selection variables
-        kl_eta = kl_discrete(params.p_hat, params.p)
+        # KL for eta selection variables. Each p_hat entry is a Bernoulli
+        # inclusion probability, not a categorical vector over perturbations.
+        kl_eta = kl_bernoulli(params.p_hat, params.p)
         return kl_beta + kl_eta
 
 
 class DenseGuideModel(GuideModel):
+    """Deterministic dense-regression guide.
+
+    This mode does not implement the spike-and-slab beta/eta posterior. Its
+    beta coefficients are treated as deterministic least-squares effects, so
+    it contributes no beta/eta KL term to the ELBO.
+    """
+
     def predict(self, params: ModelParams) -> Array:
         return self.guide_data @ params.mean_beta
 

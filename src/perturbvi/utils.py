@@ -1,11 +1,15 @@
-from datetime import datetime
-from functools import partial
+# pattern: Functional Core
 
-import pandas as pd
-import numpy as np
-import pickle
 import logging
 import os
+import pickle
+
+from datetime import datetime
+from functools import partial
+from typing import Sequence
+
+import numpy as np
+import pandas as pd
 
 import equinox as eqx
 import jax.scipy.special as jspec
@@ -13,8 +17,9 @@ import lineax as lx
 
 from jax import jit, lax, numpy as jnp, random as rdm
 from jaxtyping import Array
-from typing import Sequence
+
 from .log import get_logger
+
 
 log = get_logger("perturbvi")
 log.setLevel(logging.INFO)
@@ -44,6 +49,17 @@ def kl_discrete(alpha: Array, pi: Array) -> Array:
     The Kullback-Leibler divergence between the two distributions.
     """
     return jnp.sum(jspec.xlogy(alpha, alpha) - jspec.xlogy(alpha, pi))
+
+
+def kl_bernoulli(q: Array, p: Array, eps: float = 1e-8) -> Array:
+    """Calculate the KL divergence between Bernoulli distributions."""
+    q = jnp.clip(q, eps, 1.0 - eps)
+    p = jnp.clip(p, eps, 1.0 - eps)
+    return jnp.sum(
+        jspec.xlogy(q, q) - jspec.xlogy(q, p)
+        + jspec.xlogy(1.0 - q, 1.0 - q)
+        - jspec.xlogy(1.0 - q, 1.0 - p)
+    )
 
 
 @partial(jit, static_argnums=(2, 3, 4))
@@ -180,8 +196,8 @@ def _compute_lfsr_step(key, params, iters):
 
         # Compute outer product
         sample_oe = sample_B @ sample_W
-        ind_pos = sample_oe >= 0
-        ind_neg = sample_oe <= 0
+        ind_pos = sample_oe > 0
+        ind_neg = sample_oe < 0
 
         return (key, total_pos + ind_pos, total_neg + ind_neg), None
 
@@ -216,27 +232,16 @@ def compute_lfsr(key, params, iters=2000):
     total_neg = 0
 
     for i in range(num_chunks):
-        pos_chunk = 0
-        neg_chunk = 0
-        # Process each iteration within the chunk individually
-        for j in range(chunk_size):
-            iter_key = rdm.fold_in(key, i * chunk_size + j)  # Unique key for each iteration
-            pos, neg = _compute_lfsr_step(iter_key, params, 1)  # Process single iteration
-            pos_chunk += pos
-            neg_chunk += neg
+        iter_key = rdm.fold_in(key, i * chunk_size)
+        pos_chunk, neg_chunk = _compute_lfsr_step(iter_key, params, chunk_size)
         total_pos += pos_chunk
         total_neg += neg_chunk
         log.info(f"Completed {(i + 1) * chunk_size}/{iters} iterations")
 
     # Handle remaining iterations if any
     if remaining > 0:
-        pos_rem = 0
-        neg_rem = 0
-        for j in range(remaining):
-            iter_key = rdm.fold_in(key, num_chunks * chunk_size + j)
-            pos, neg = _compute_lfsr_step(iter_key, params, 1)
-            pos_rem += pos
-            neg_rem += neg
+        iter_key = rdm.fold_in(key, num_chunks * chunk_size)
+        pos_rem, neg_rem = _compute_lfsr_step(iter_key, params, remaining)
         total_pos += pos_rem
         total_neg += neg_rem
         log.info(f"Completed {iters}/{iters} iterations")
@@ -265,7 +270,10 @@ def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
     for k in range(z_dim):
         num_signal = jnp.where(pip[k, :] >= rho)[0].shape[0]
         num_zero = jnp.where(pip[k, :] < rho_prime)[0].shape[0]
-        log.info(f"Component {k} has {num_signal} features with pip>{rho}; and {num_zero} features with pip<{rho_prime}")
+        log.info(
+            f"Component {k} has {num_signal} features with pip>{rho}; "
+            f"and {num_zero} features with pip<{rho_prime}"
+        )
         results.append([num_signal, num_zero])
 
     df = pd.DataFrame(results, columns=["num_signal", "num_zero"])
