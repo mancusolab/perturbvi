@@ -36,10 +36,7 @@ def test_kl_bernoulli_includes_inclusion_and_exclusion_states():
     q = jnp.array([[0.2, 0.8]])
     p = jnp.array([0.5, 0.25])
 
-    expected = jnp.sum(
-        q * jnp.log(q / p)
-        + (1.0 - q) * jnp.log((1.0 - q) / (1.0 - p))
-    )
+    expected = jnp.sum(q * jnp.log(q / p) + (1.0 - q) * jnp.log((1.0 - q) / (1.0 - p)))
 
     assert jnp.allclose(kl_bernoulli(q, p), expected)
 

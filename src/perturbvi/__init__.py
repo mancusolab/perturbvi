@@ -7,12 +7,12 @@ from .infer import (
     compute_pve as compute_pve,
     infer as infer,
 )
+from .io import save_results as save_results
 from .sim import generate_sim as generate_sim
 from .utils import (
-    compute_lfsr as compute_lfsr,
     analyze_output as analyze_output,
+    compute_lfsr as compute_lfsr,
 )
-from .io import save_results as save_results
 
 
 try:

@@ -24,7 +24,6 @@ class FactorMoments(NamedTuple):
 
 
 class FactorModel(eqx.Module):
-
     def update(self, data: DataMatrix, guide: GuideModel, loadings: "LoadingModel", params: ModelParams) -> ModelParams:
         mean_w, mean_ww = loadings.moments(params)
         z_dim = params.z_dim
@@ -159,7 +158,6 @@ def _loop_factors(kdx: int, loop_params: _FactorLoopResults) -> _FactorLoopResul
 
 
 class LoadingModel(eqx.Module):
-
     def update(self, data: DataMatrix, factors: FactorModel, params: ModelParams) -> ModelParams:
         z_dim = params.z_dim
         _, mean_zz = factors.moments(params)
@@ -180,7 +178,7 @@ class LoadingModel(eqx.Module):
 
     def moments(self, params: ModelParams) -> LoadingMoments:
         term1 = (params.mean_w**2 + params.var_w[:, :, jnp.newaxis]) * params.alpha
-        term2 = (params.mean_w * params.alpha)**2
+        term2 = (params.mean_w * params.alpha) ** 2
         trace_var = jnp.sum(term1 - term2, axis=(-1, 0))
 
         mu_w = jnp.sum(params.mean_w * params.alpha, axis=0)

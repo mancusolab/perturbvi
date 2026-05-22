@@ -10,8 +10,8 @@ from .sparse import CenteredSparseMatrix, SparseMatrix
 DataMatrix = Array | SparseMatrix | CenteredSparseMatrix
 FloatOrArray = Union[float, ArrayLike]
 
-class ELBOResults(NamedTuple):
 
+class ELBOResults(NamedTuple):
     """Define the class of all components in ELBO.
 
     Attributes:

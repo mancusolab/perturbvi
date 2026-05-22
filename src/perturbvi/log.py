@@ -3,6 +3,7 @@ import logging
 
 _log = logging.getLogger()
 
+
 def get_logger(name, path=None, level=logging.INFO):
     """get logger for perturbvi progress"""
     logger = logging.getLogger(name)

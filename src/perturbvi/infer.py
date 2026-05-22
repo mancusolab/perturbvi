@@ -1,3 +1,7 @@
+# pattern: Functional Core
+
+import logging
+
 from typing import get_args, Literal, NamedTuple, Optional, Tuple
 
 from plum import dispatch
@@ -17,11 +21,10 @@ from .common import (
 )
 from .factorloadings import FactorModel, LoadingModel
 from .guide import DenseGuideModel, GuideModel, SparseGuideModel
+from .log import get_logger
 from .sparse import CenteredSparseMatrix, SparseMatrix
 from .utils import prob_pca
-from .log import get_logger
 
-import logging
 
 log = get_logger("perturbvi")
 log.setLevel(logging.INFO)
@@ -37,6 +40,16 @@ def _is_valid(X: ArrayLike):
 @dispatch
 def _is_valid(X: sparse.JAXSparse):
     return jnp.all(jnp.isfinite(X.data))
+
+
+@dispatch
+def _column_sumsq(X: ArrayLike):
+    return jnp.sum(jnp.asarray(X) ** 2, axis=0)
+
+
+@dispatch
+def _column_sumsq(X: sparse.JAXSparse):
+    return sparse.sparsify(jnp.sum)(X**2, axis=0).todense()  # type: ignore
 
 
 def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, params: ModelParams) -> ModelParams:
@@ -121,7 +134,7 @@ def compute_elbo(
     # or just ignore it
     exp_logl = (-0.5 * params.tau) * (
         params.x_ssq
-        -2 * jnp.einsum("kp,np,nk->", mean_w, X, mean_z)  # tr(E[W] @ X.T @ E[Z])
+        - 2 * jnp.einsum("kp,np,nk->", mean_w, X, mean_z)  # tr(E[W] @ X.T @ E[Z])
         + jnp.einsum("ij,ji->", mean_zz, mean_ww)  # tr(E[Z.T @ Z] @ E[W @ W.T])
     ) + 0.5 * n_dim * p_dim * jnp.log(params.tau)
 
@@ -232,7 +245,7 @@ def _init_params(
     init: _init_type = "pca",
 ) -> ModelParams:
     log.info("Starting model parameter initialization...")
-    
+
     # Base parameters
     n_dim, p_dim = X.shape
     tau_0 = jnp.ones((l_dim, z_dim))
@@ -271,9 +284,9 @@ def _init_params(
     log.info("✓ Loadings initialized (60%)")
 
     # Alpha and pi
-    #init_alpha = random.dirichlet(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
-    #init_alpha =jax.jit(random.dirichlet)(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
-    init_alpha = jnp.full((l_dim, z_dim, p_dim), 1. / p_dim)
+    # init_alpha = random.dirichlet(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
+    # init_alpha =jax.jit(random.dirichlet)(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
+    init_alpha = jnp.full((l_dim, z_dim, p_dim), 1.0 / p_dim)
     log.info("Avoid dirichlet process")
     init_alpha.block_until_ready()
     if isinstance(annotations, AnnotationPriorModel):
@@ -305,7 +318,7 @@ def _init_params(
     p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
     p_hat.block_until_ready()
     log.info("✓ Priors setup complete (100%)")
-    
+
     log.info("✓ Model parameter initialization completed successfully")
 
     return ModelParams(
@@ -329,8 +342,13 @@ def _init_params(
 
 
 def _check_args(
-    X: ArrayLike | sparse.JAXSparse, A: Optional[ArrayLike | sparse.JAXSparse], z_dim: int, l_dim: int, init: _init_type
-) -> Tuple[Array | sparse.JAXSparse, Array | sparse.JAXSparse]:
+    X: ArrayLike | sparse.JAXSparse,
+    G: ArrayLike | sparse.JAXSparse,
+    A: Optional[ArrayLike | sparse.JAXSparse],
+    z_dim: int,
+    l_dim: int,
+    init: _init_type,
+) -> Tuple[Array | sparse.JAXSparse, Array | sparse.JAXSparse, Array | sparse.JAXSparse | None]:
     # pull type options for init
     type_options = get_args(_init_type)
 
@@ -358,6 +376,23 @@ def _check_args(
     if not _is_valid(X):
         raise ValueError("X contains 'nan/inf'. Please check input data for correctness or missingness")
 
+    if isinstance(G, ArrayLike):
+        G = jnp.asarray(G)
+    if G.ndim != 2:
+        raise ValueError(f"Dimension of guide matrix G should be 2: received {len(G.shape)}")
+    g_n_dim, g_dim = G.shape
+    if g_n_dim != n_dim:
+        raise ValueError(
+            f"Leading dimension of guide matrix G should match sample dimension {n_dim}: received {g_n_dim}"
+        )
+    if g_dim <= 0:
+        raise ValueError("Guide matrix G should contain at least one perturbation column")
+    if not _is_valid(G):
+        raise ValueError("G contains 'nan/inf'. Please check input data for correctness or missingness")
+    zero_cols = jnp.where(_column_sumsq(G) == 0)[0]
+    if zero_cols.size > 0:
+        raise ValueError(f"G contains all-zero perturbation columns at indices {zero_cols.tolist()}")
+
     if A is not None:
         if isinstance(A, ArrayLike):
             A = jnp.asarray(A)
@@ -375,7 +410,7 @@ def _check_args(
     if init not in type_options:
         raise ValueError(f"Unknown initialization provided '{init}'; Choices: {type_options}")
 
-    return X, A  # type: ignore
+    return X, G, A  # type: ignore
 
 
 class InferResults(NamedTuple):
@@ -458,7 +493,7 @@ def infer(
     """
 
     # sanity check arguments
-    X, A = _check_args(X, A, z_dim, l_dim, init)
+    X, G, A = _check_args(X, G, A, z_dim, l_dim, init)
 
     # cast to jax array
     if isinstance(X, Array):

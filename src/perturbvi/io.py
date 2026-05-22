@@ -1,5 +1,5 @@
-import pickle
 import logging
+import pickle
 
 from typing import Optional, Tuple
 
@@ -12,6 +12,7 @@ from adjustText import adjust_text
 
 from .infer import InferResults
 from .log import get_logger
+
 
 log = get_logger("perturbvi")
 log.setLevel(logging.INFO)
@@ -170,7 +171,7 @@ def plot_beta(
 
     column = f"b{factor_idx}"
     if column not in df.columns:
-        raise ValueError(f"Factor index {factor_idx} out of range. Should be between 0 and {z_dim-1}")
+        raise ValueError(f"Factor index {factor_idx} out of range. Should be between 0 and {z_dim - 1}")
 
     plt.figure(figsize=figsize)
 
@@ -213,11 +214,16 @@ def plot_beta(
         plt.show()
 
 
-def draw_perturb_heatmap(results: InferResults, perturb_names: Optional[list] = None,
-                        figsize: Tuple[int, int] = (10, 6), cmap: str = 'seismic',
-                        save_path: Optional[str] = None, dpi: int = 300) -> None:
+def draw_perturb_heatmap(
+    results: InferResults,
+    perturb_names: Optional[list] = None,
+    figsize: Tuple[int, int] = (10, 6),
+    cmap: str = "seismic",
+    save_path: Optional[str] = None,
+    dpi: int = 300,
+) -> None:
     """Draw heatmap of perturbation effects across factors.
-    
+
     Args:
         results: InferResults object containing inference results
         perturb_names: Optional list of perturbation names for y-axis labels
@@ -229,37 +235,38 @@ def draw_perturb_heatmap(results: InferResults, perturb_names: Optional[list] = 
     # Extract parameters and compute sparse beta matrix
     params = results.params
     z_dim = params.mean_beta.shape[1]
-    
+
     # Create beta matrix and dataframe
     beta_sparse = params.mean_beta * params.p_hat.T
-    column_names = [f'{i}' for i in range(z_dim)]
+    column_names = [f"{i}" for i in range(z_dim)]
     df = pd.DataFrame(beta_sparse, columns=column_names)
-    
+
     if perturb_names is not None:
         if len(perturb_names) != len(df):
-            raise ValueError(f"Length of perturb_names ({len(perturb_names)}) must match number of perturbations ({len(df)})")
+            raise ValueError(
+                f"Length of perturb_names ({len(perturb_names)}) must match number of perturbations ({len(df)})"
+            )
         df.index = perturb_names
 
     # Create figure and axes
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Create symmetric color scale
     vmax = np.max(np.abs(df))
-    
+
     # Draw heatmap
     sns.heatmap(df, cmap=cmap, center=0, vmin=-vmax, vmax=vmax, ax=ax)
-    
+
     # Move x-axis labels and ticks to top
     ax.xaxis.tick_top()
-    ax.xaxis.set_label_position('top')
-    
+    ax.xaxis.set_label_position("top")
+
     # Set labels
     ax.set_xlabel("Factors")
     ax.set_ylabel("Perturbations")
-    
+
     if save_path is not None:
-        plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
+        plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
         plt.close()
     else:
         plt.show()
-

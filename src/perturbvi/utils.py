@@ -55,11 +55,7 @@ def kl_bernoulli(q: Array, p: Array, eps: float = 1e-8) -> Array:
     """Calculate the KL divergence between Bernoulli distributions."""
     q = jnp.clip(q, eps, 1.0 - eps)
     p = jnp.clip(p, eps, 1.0 - eps)
-    return jnp.sum(
-        jspec.xlogy(q, q) - jspec.xlogy(q, p)
-        + jspec.xlog1py(1.0 - q, -q)
-        - jspec.xlog1py(1.0 - q, -p)
-    )
+    return jnp.sum(jspec.xlogy(q, q) - jspec.xlogy(q, p) + jspec.xlog1py(1.0 - q, -q) - jspec.xlog1py(1.0 - q, -p))
 
 
 @partial(jit, static_argnums=(2, 3, 4))
@@ -271,8 +267,7 @@ def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
         num_signal = jnp.where(pip[k, :] >= rho)[0].shape[0]
         num_zero = jnp.where(pip[k, :] < rho_prime)[0].shape[0]
         log.info(
-            f"Component {k} has {num_signal} features with pip>{rho}; "
-            f"and {num_zero} features with pip<{rho_prime}"
+            f"Component {k} has {num_signal} features with pip>{rho}; and {num_zero} features with pip<{rho_prime}"
         )
         results.append([num_signal, num_zero])
 
@@ -290,7 +285,7 @@ def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
     return df
 
 
-def find_top_genes(df, pip_cutoff = 0.9):
+def find_top_genes(df, pip_cutoff=0.9):
     high_value_genes = {}
     for column in df.columns:
         high_values = df[df[column] > pip_cutoff].index.tolist()
@@ -351,8 +346,8 @@ def analyze_output(
     # pip_df = pd.DataFrame(pip.T, columns=column_names_w)
     pip_df = pd.DataFrame(pip.T, columns=column_names_w, index=background_genes)
     pip_df.to_csv(pip_df_path)
-    
-    analysis = pip_analysis(jnp.asarray(pip).astype(jnp.float32),rho=0.90,rho_prime=0.10)
+
+    analysis = pip_analysis(jnp.asarray(pip).astype(jnp.float32), rho=0.90, rho_prime=0.10)
 
     for col in pip_df.columns:
         sig_genes = pip_df.index[pip_df[col] > 0.9].tolist()
@@ -379,11 +374,10 @@ def analyze_output(
     # number of degs per w from PIP (find top genes with high pip)
     # top_pip_degs = find_top_genes(pip_df,0.90)
     # number of degs per w from PIP
-    num_deg_per_w = (pip_df>0.9).sum(axis=0)
-
+    num_deg_per_w = (pip_df > 0.9).sum(axis=0)
 
     # number of degs per perturbed gene from LFSR
-    num_deg_per_gene = (lfsr_df<0.05).sum(axis=0)
+    num_deg_per_gene = (lfsr_df < 0.05).sum(axis=0)
 
     for col in lfsr_df.columns:
         sig_genes = lfsr_df.index[lfsr_df[col] < 0.05].tolist()
@@ -395,7 +389,7 @@ def analyze_output(
     # p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b)
     p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b, index=perturb_genes)
     p_hat_df.to_csv(p_hat_path)
-        
+
     # beta_df = pd.DataFrame(beta_sparse, columns=column_names_b)
     beta_df = pd.DataFrame(beta_sparse, columns=column_names_b, index=perturb_genes)
     beta_df.to_csv(beta_path)

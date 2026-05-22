@@ -1,23 +1,27 @@
-from pathlib import Path
 import argparse as ap
 import logging
-import sys
 import os
+import sys
 
-import scanpy as sc
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import scanpy as sc
 
 import jax
 import jax.numpy as jnp
+
 from jax.experimental import sparse
 
+from perturbvi import infer
 from perturbvi.io import save_results
 from perturbvi.log import get_logger
-from perturbvi import infer
+
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_default_matmul_precision", "highest")
+
 
 def main(args):
     argp = ap.ArgumentParser(description="Run perturbVI inference")
@@ -27,16 +31,17 @@ def main(args):
     argp.add_argument("l_dim", type=int, help="Number of single effects")
     argp.add_argument("tau", type=int, help="residual precision")
     argp.add_argument("-o", "--output", type=str, help="Output directory")
+    argp.add_argument("--device", choices=["cpu", "gpu"], default="cpu", help="JAX device to use")
     argp.add_argument(
-        "--device", choices=["cpu", "gpu"], default="cpu", help="JAX device to use"
-    )
-    argp.add_argument(
-        "--verbose", action="store_true", default=False, help="verbose logging",
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="verbose logging",
     )
 
     args = argp.parse_args(args)
 
-    out = args.output.rstrip('/')
+    out = args.output.rstrip("/")
     os.makedirs(out, exist_ok=True)
     log = get_logger(__name__, out)
     log.setLevel(logging.DEBUG if args.verbose else logging.INFO)
@@ -60,9 +65,7 @@ def main(args):
         raise ValueError(f"Unsupported file type: {ext}")
 
     df_G = pd.read_csv(guide_path, index_col=0)
-    df_G = df_G.drop(
-        ["cell_barcode", "non-targeting", "Nontargeting"], axis=1, errors="ignore"
-    )
+    df_G = df_G.drop(["cell_barcode", "non-targeting", "Nontargeting"], axis=1, errors="ignore")
     G = jnp.asarray(df_G).astype(jnp.float64)
     g_sp = sparse.bcoo_fromdense(G)
     del G, df_G
@@ -85,9 +88,7 @@ def main(args):
 
     log.info("finished inference!")
 
-    log.info(
-        f"PVE across {args.z_dim} factors are {results.pve}; total PVE is {np.sum(results.pve)}"
-    )
+    log.info(f"PVE across {args.z_dim} factors are {results.pve}; total PVE is {np.sum(results.pve)}")
 
     save_results(results, path=out)
     log.info("saved results!")
@@ -95,6 +96,7 @@ def main(args):
 
 def run_cli():
     return main(sys.argv[1:])
+
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
