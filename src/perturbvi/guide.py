@@ -136,8 +136,13 @@ class SparseGuideModel(GuideModel):
         return self.guide_data @ (params.mean_beta * params.p_hat.T)
 
     def weighted_sumsq(self, params: ModelParams) -> Array:
-        mean_bb = jnp.sum((params.mean_beta**2 + params.var_beta) * params.p_hat.T, axis=1)
-        return _wgt_sumsq(self.guide_data, jnp.sqrt(mean_bb))
+        mean_b = params.mean_beta * params.p_hat.T
+        second_b = (params.mean_beta**2 + params.var_beta) * params.p_hat.T
+        var_b = second_b - mean_b**2
+
+        mean_term = jnp.sum((self.guide_data @ mean_b) ** 2)
+        var_term = jnp.sum(self.gsq_diag[:, jnp.newaxis] * var_b)
+        return mean_term + var_term
 
     def update(self, params: ModelParams) -> ModelParams:
         # compute E[Z'k]G: remove the g-th effect
