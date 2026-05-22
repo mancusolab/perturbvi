@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# pattern: Functional Core
 from typing import Optional
 
 from plum import dispatch
@@ -203,6 +204,12 @@ def _(op):
 
 @lx.is_negative_semidefinite.register(SparseMatrix)
 @lx.is_negative_semidefinite.register(CenteredSparseMatrix)
+def _(op):
+    return False
+
+
+@lx.is_positive_semidefinite.register(SparseMatrix)
+@lx.is_positive_semidefinite.register(CenteredSparseMatrix)
 def _(op):
     return False
 

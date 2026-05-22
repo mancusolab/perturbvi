@@ -57,8 +57,8 @@ def kl_bernoulli(q: Array, p: Array, eps: float = 1e-8) -> Array:
     p = jnp.clip(p, eps, 1.0 - eps)
     return jnp.sum(
         jspec.xlogy(q, q) - jspec.xlogy(q, p)
-        + jspec.xlogy(1.0 - q, 1.0 - q)
-        - jspec.xlogy(1.0 - q, 1.0 - p)
+        + jspec.xlog1py(1.0 - q, -q)
+        - jspec.xlog1py(1.0 - q, -p)
     )
 
 

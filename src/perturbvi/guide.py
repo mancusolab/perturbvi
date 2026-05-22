@@ -1,7 +1,6 @@
 # pattern: Functional Core
 
 from abc import abstractmethod
-from dataclasses import field
 
 from plum import dispatch
 
@@ -104,10 +103,11 @@ def _update_dense_beta(G: SparseMatrix, params: ModelParams) -> ModelParams:
 
 class GuideModel(eqx.Module):
     guide_data: Array | SparseMatrix
-    gsq_diag: Array = field(init=False)
+    gsq_diag: Array
 
-    def __post_init__(self):
-        self.gsq_diag = _get_diag(self.guide_data)  # type: ignore
+    def __init__(self, guide_data: Array | SparseMatrix):
+        self.guide_data = guide_data
+        self.gsq_diag = _get_diag(guide_data)  # type: ignore
 
     @property
     def shape(self):

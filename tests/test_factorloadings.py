@@ -2,8 +2,8 @@
 
 import jax.numpy as jnp
 
-from perturbvi.common import ModelParams
 from perturbvi.factorloadings import FactorModel
+from tests.helpers import make_model_params
 
 
 class _Guide:
@@ -19,7 +19,7 @@ class _Loadings:
 
 
 def _params():
-    return ModelParams(
+    return make_model_params(
         x_ssq=jnp.array(1.0),
         mean_z=jnp.zeros((3, 2)),
         var_z=jnp.eye(2),
@@ -35,7 +35,6 @@ def _params():
         var_beta=jnp.ones((2, 2)),
         tau_beta=jnp.ones((2,)),
         p=jnp.ones((2,)) / 2,
-        p_hat=jnp.ones((2, 2)) / 2,
     )
 
 
@@ -62,3 +61,26 @@ def test_factor_update_does_not_call_explicit_inverse(monkeypatch):
     assert updated.var_z.shape == (2, 2)
     assert jnp.all(jnp.isfinite(updated.mean_z))
     assert jnp.all(jnp.isfinite(updated.var_z))
+
+
+def test_factor_update_matches_explicit_inverse_reference():
+    data = jnp.array(
+        [
+            [1.0, -1.0],
+            [0.5, 2.0],
+            [-1.5, 0.25],
+        ]
+    )
+    params = _params()
+    guide = _Guide()
+    loadings = _Loadings()
+
+    updated = FactorModel().update(data=data, guide=guide, loadings=loadings, params=params)
+
+    mean_w, mean_ww = loadings.moments(params)
+    precision = params.tau * mean_ww + jnp.eye(params.z_dim)
+    expected_var = jnp.linalg.inv(precision)
+    expected_mean = (params.tau * (data @ mean_w.T) + guide.predict(params)) @ expected_var
+
+    assert jnp.allclose(updated.var_z, expected_var)
+    assert jnp.allclose(updated.mean_z, expected_mean)
