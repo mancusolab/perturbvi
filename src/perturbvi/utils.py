@@ -192,8 +192,8 @@ def _compute_lfsr_step(key, params, iters):
 
         # Compute outer product
         sample_oe = sample_B @ sample_W
-        ind_pos = sample_oe > 0
-        ind_neg = sample_oe < 0
+        ind_pos = sample_oe >= 0
+        ind_neg = sample_oe <= 0
 
         return (key, total_pos + ind_pos, total_neg + ind_neg), None
 

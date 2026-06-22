@@ -29,10 +29,10 @@ def _zero_effect_params():
     )
 
 
-def test_lfsr_does_not_count_exact_zero_effects_as_both_signs():
+def test_lfsr_gives_maximum_uncertainty_for_exact_zero_effects():
     lfsr = compute_lfsr(random.PRNGKey(0), _zero_effect_params(), iters=3)
 
-    assert jnp.array_equal(lfsr, jnp.zeros((1, 1)))
+    assert jnp.array_equal(lfsr, jnp.ones((1, 1)))
 
 
 def test_lfsr_runs_one_jitted_scan_per_chunk(monkeypatch):
