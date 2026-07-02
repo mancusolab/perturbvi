@@ -54,6 +54,7 @@ dist/*
 sdist/*
 docs/_rst/*
 docs/_build/*
+docs/superpowers/*
 cover/*
 site/
 MANIFEST
