@@ -17,7 +17,7 @@ from .log import get_logger
 log = get_logger("perturbvi")
 log.setLevel(logging.INFO)
 
-__all__ = ["save_results"]
+__all__ = ["save_results", "load_results"]
 
 
 # save all results as a pickle object
@@ -44,6 +44,24 @@ def save_results(results: InferResults, path: str):
     log.info(f"Results saved successfully at {path}")
 
     return
+
+
+def load_results(path: str) -> InferResults:
+    """Load saved perturbVI results from a results directory.
+
+    Args:
+        path: directory written by save_results (must contain params_file.pkl, pip.txt, pve.txt)
+
+    Returns:
+        InferResults with params, pve, pip populated. elbo is None (not persisted).
+    """
+    with open(f"{path}/params_file.pkl", "rb") as f:
+        params = pickle.load(f)
+
+    pip = np.loadtxt(f"{path}/pip.txt")
+    pve = np.loadtxt(f"{path}/pve.txt")
+
+    return InferResults(params=params, elbo=None, pve=pve, pip=pip)
 
 
 # # function to find genes with high pip

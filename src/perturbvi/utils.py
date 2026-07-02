@@ -301,6 +301,8 @@ def analyze_output(
     """
     Produce results from output files.
 
+    Deprecated path: use ``perturbvi.analyze_saved_results`` instead.
+
     Args:
         dir: Results directory
         perturb_genes: List of perturbed gene symbols (e.g. 14 genes)

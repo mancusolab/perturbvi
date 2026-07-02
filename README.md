@@ -27,57 +27,109 @@ perturbvi --help
 ```
 
 
-## Get Started with `perturbvi`
+## CLI
 
-Perform inference using SuSiE PCA to find the regulatory modules from CRISPR perturbation data
-``` bash
-perturbvi <matrix> <guide> <z_dim> <l_dim> <tau> -o=<out_dir> --verbose
-```
+Fit from an AnnData `.h5ad` file:
 
-#### Arguments
-- `matrix`: Path to the experiment CSV file.
-- `guide`: Path to the guide CSV file.
-- `z_dim`: Number of latent factors, Z dim (12).
-- `l_dim`: Number of single effects, L dim (400).
-- `tau`: Residual precision, Tau (800).
-- `out_dir`: Specifies the output directory path.
-- `--verbose`: For logging (Optional).
-
-#### Example Usage
 ```bash
-perturbvi luhmes_exp.csv luhmes_G.csv 12 400 800 -o=results --verbose
+perturbvi fit screen.h5ad \
+  --output results \
+  --z-dim 12 \
+  --l-dim 400 \
+  --tau 800 \
+  --guide-key perturbation \
+  --control-label non-targeting \
+  --p-prior 0.1 \
+  --seed 1
+
+# with covariate residualization
+perturbvi fit screen.h5ad \
+  --output results \
+  --z-dim 12 --l-dim 400 --tau 800 \
+  --guide-key perturbation \
+  --covariates batch percent_mito n_counts \
+  --categoricals batch
 ```
 
-This will save all the files (including `params.pkl`) in `results` folder.
+Fit from a 10x feature-barcode H5 file:
 
-We can analyze results:
+```bash
+perturbvi fit filtered_feature_bc_matrix.h5 \
+  --format 10x-h5 \
+  --output results \
+  --z-dim 12 \
+  --l-dim 400 \
+  --tau 800
+```
+
+Analyze saved results:
+
+```bash
+perturbvi analyze results \
+  --gene-names genes.csv \
+  --perturbation-names perturbations.csv \
+  --output results/analysis
+
+# add --compute-lfsr to run the (expensive) LFSR step
+perturbvi analyze results \
+  --gene-names genes.csv \
+  --perturbation-names perturbations.csv \
+  --compute-lfsr \
+  --lfsr-iters 2000
+```
+
+## Python API
+
+High-level path from file to results:
+
 ```python
-import perturbvi
+from perturbvi import load_screen, residualize_screen, fit_screen, save_results, analyze_results
 
-guide_path="luhmes_G.csv"
-gene_symbol_path = "luhmes_gene_symbol.csv"
-
-OUTPUT_DIR = "results"
-
-G = pd.read_csv(guide_path, index_col=0)
-G_reduce = G.drop(columns=["Nontargeting"])
-# 14 genes perturbed
-perturbed = G_reduce.columns.to_list()
-# 6000 gene symbols (background genes)
-genes = pd.read_csv(gene_path, header=None)[0].to_list()
-
-results = perturbvi.utils.analyze_output(
-  OUTPUT_DIR, 
-  perturb_genes=perturbed, 
-  background_genes=genes
+screen = load_screen(
+    "screen.h5ad",
+    guide_key="perturbation",
+    control_label="non-targeting",
+    covariates=["batch", "percent_mito", "n_counts"],  # optional
 )
 
-# number of degs per w from PIP
-print(results["num_deg_per_w"])
+# optional — skip if expression is already clean
+screen = residualize_screen(screen, categoricals=["batch"])
 
-# number of degs per perturbed gene from LFSR
-print(results["num_deg_per_perturbed_gene"])
+results = fit_screen(screen, z_dim=12, l_dim=400, tau=800)
+
+save_results(results, path="results/")
+# writes: W.txt, pip.txt, pve.txt, params_file.pkl
+
+tables = analyze_results(
+    results,
+    gene_names=screen.gene_names,
+    perturbation_names=screen.perturbation_names,
+)
+# tables["pip_df"], tables["overall_effect_df"], ...
+
+# LFSR requires an explicit flag
+tables = analyze_results(results, compute_lfsr=True, lfsr_iters=2000)
 ```
+
+Low-level array API (unchanged):
+
+```python
+from perturbvi import infer, save_results
+
+results = infer(X, z_dim=12, l_dim=400, G=G, tau=800)
+save_results(results, path="results/")
+```
+
+## Supported Input Formats
+
+| Format | Description |
+|---|---|
+| `.h5ad` | AnnData file. Use `--guide-key` (obs column) or `--guide-obsm` (obsm key) to specify guides. |
+| `10x-h5` | 10x feature-barcode HDF5 file. Guides extracted by feature type. |
+| `10x-mex` | 10x MEX directory (`matrix.mtx`, `features.tsv`, `barcodes.tsv`). |
+| CSV/TSV | Use the low-level `infer()` API directly for small files and tests. |
+
+Zarr is not yet first-class. Covariate residualization for 10x formats is planned; use the Python API to construct `ScreenData.covariates` manually for now.
 
 
 ## Notes
