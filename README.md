@@ -112,17 +112,6 @@ save_results(fitted, path="results/")
 
 ### 3. Analyze
 
-Two ways to get to the same analysis tables, depending on whether you still have
-`fitted` in memory:
-
-| You have...                                          | Call                                     |
-|--------------------------------------------------------|---------------------------------------------|
-| `fitted` in memory (just fit it)                        | `analyze(fitted, ...)`                       |
-| only a `results/` directory (new session, no refit)      | `analyze_saved("results/", ...)`             |
-
-Both accept the *same* optional keyword arguments and return the *same* dict of tables — the
-only difference is what you pass in first (an object vs. a path).
-
 ```python
 from perturbvi import analyze
 
@@ -134,20 +123,21 @@ results = analyze(
 )
 ```
 
-```python
-# Equivalent, but starting fresh from disk instead of the in-memory `fitted`
-# (e.g. in a new script the next day):
-from perturbvi import analyze_saved
+`results` is a dict of DataFrames: `pip_df`, `pve_df`, `beta_df`, `p_hat_df`, `overall_effect_df`.
 
-results = analyze_saved(
-    "results/",
+Analyzing results saved in an earlier session, without refitting — load, then analyze:
+
+```python
+from perturbvi import load_results, analyze
+
+fitted = load_results("results/")
+results = analyze(
+    fitted,
     gene_names=screen.gene_names,                  # optional
     perturbation_names=screen.perturbation_names,  # optional
     compute_lfsr=False,                            # optional, default: False
 )
 ```
-
-`results` is a dict of DataFrames: `pip_df`, `pve_df`, `beta_df`, `p_hat_df`, `overall_effect_df`.
 
 > [!IMPORTANT]
 > `compute_lfsr=True` triggers an expensive Monte Carlo computation (`lfsr_iters`, default
@@ -211,15 +201,33 @@ perturbvi fit path/to/mex_dir/ \
 
 ### CSV/TSV
 
-No CLI support yet — use the low-level `infer()` API directly for small files and tests:
+No CLI support yet — use the low-level `infer()` API directly. `G` can be dense or sparse
+(`jax.experimental.sparse`); drop any non-targeting/control columns from the guide matrix
+before converting it. Expression is expected to already be residualized/QC'd — there's no
+`residualize_screen` step in this path, unlike `.h5ad`.
 
 ```python
-import numpy as np
-from perturbvi import infer
+import jax.numpy as jnp
+import pandas as pd
+from jax.experimental import sparse
+from perturbvi import infer, save_results, analyze
 
-X = np.loadtxt("expression.csv", delimiter=",")
-G = np.loadtxt("guides.csv", delimiter=",")
-results = infer(X, z_dim=12, l_dim=400, G=G, tau=800)
+# Expression: cells x genes. Assumed already residualized/preprocessed.
+X = jnp.asarray(pd.read_csv("expression.csv", index_col=0), dtype=jnp.float64)
+
+# Guides: cells x perturbations. Drop non-targeting/control columns first.
+guide = pd.read_csv("guides.csv", index_col=0)
+guide = guide.drop(columns=["non-targeting"], errors="ignore")
+G = sparse.bcoo_fromdense(jnp.asarray(guide, dtype=jnp.float64))
+
+fitted = infer(
+    X, z_dim=12, l_dim=500, G=G,
+    p_prior=0.1, standardize=True, tau=50,
+    init="pca", max_iter=1000, tol=1e-2,
+)
+
+save_results(fitted, path="results/")
+results = analyze(fitted, perturbation_names=guide.columns.tolist())
 ```
 
 > [!NOTE]

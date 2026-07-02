@@ -94,8 +94,6 @@ def _add_analyze_args(p: argparse.ArgumentParser) -> None:
         "--output", default=None,
         help="Analysis output directory (default: <results_dir>/analysis)",
     )
-    p.add_argument("--pip-threshold", type=float, default=0.9, help="PIP significance threshold (default: 0.9)")
-    p.add_argument("--lfsr-threshold", type=float, default=0.05, help="LFSR significance threshold (default: 0.05)")
     p.add_argument(
         "--compute-lfsr", action="store_true", default=False,
         help="Compute LFSR (expensive Monte Carlo step; off by default)",
@@ -195,7 +193,7 @@ def _cmd_fit(args, log) -> None:
 
 
 def _cmd_analyze(args, log) -> None:
-    from perturbvi import analyze_saved
+    from perturbvi import analyze, load_results
 
     results_dir = Path(args.results_dir)
     out = Path(args.output) if args.output else results_dir / "analysis"
@@ -205,13 +203,13 @@ def _cmd_analyze(args, log) -> None:
     perturbation_names = _read_names(args.perturbation_names) if args.perturbation_names else None
 
     log.info(f"Loading results from: {results_dir}")
+    fitted = load_results(str(results_dir))
+
     log.info("Running analysis...")
-    tables = analyze_saved(
-        str(results_dir),
+    tables = analyze(
+        fitted,
         gene_names=gene_names,
         perturbation_names=perturbation_names,
-        pip_threshold=args.pip_threshold,
-        lfsr_threshold=args.lfsr_threshold,
         compute_lfsr=args.compute_lfsr,
         lfsr_iters=args.lfsr_iters,
         seed=args.seed,

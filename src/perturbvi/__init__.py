@@ -1,6 +1,6 @@
 from importlib.metadata import PackageNotFoundError, version  # pragma: no cover
 
-from .analysis import analyze as analyze, analyze_saved as analyze_saved
+from .analysis import analyze as analyze
 from .infer import (
     compute_elbo as compute_elbo,
     compute_pip as compute_pip,

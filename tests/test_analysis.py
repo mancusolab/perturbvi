@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from perturbvi import analyze, analyze_saved, infer, save_results
+from perturbvi import analyze, infer, load_results, save_results
 
 
 @pytest.fixture
@@ -46,9 +46,10 @@ def test_analyze_lfsr_not_called_by_default(small_results):
     assert "lfsr_df" not in tables
 
 
-def test_analyze_saved(small_results):
-    results, tmp_path = small_results
-    tables = analyze_saved(str(tmp_path), gene_names=None, perturbation_names=None)
+def test_analyze_from_loaded_results(small_results):
+    _, tmp_path = small_results
+    fitted = load_results(str(tmp_path))
+    tables = analyze(fitted, gene_names=None, perturbation_names=None)
     assert "pip_df" in tables
     assert "pve_df" in tables
 

@@ -9,8 +9,6 @@ def analyze(
     *,
     gene_names: Optional[Sequence[str]] = None,
     perturbation_names: Optional[Sequence[str]] = None,
-    pip_threshold: float = 0.9,
-    lfsr_threshold: float = 0.05,
     compute_lfsr: bool = False,
     lfsr_iters: int = 2000,
     seed: int = 0,
@@ -21,8 +19,6 @@ def analyze(
         results: InferResults returned by infer() or fit_screen(), or loaded by load_results().
         gene_names: Gene names for row labels. If None, integer indices are used.
         perturbation_names: Perturbation names for column/row labels. If None, integer indices are used.
-        pip_threshold: PIP cutoff used to filter significant genes (informational, not applied here).
-        lfsr_threshold: LFSR cutoff used to filter significant genes (informational, not applied here).
         compute_lfsr: If True, compute LFSR. Expensive — skip unless needed.
         lfsr_iters: Number of Monte Carlo iterations for LFSR (used only if compute_lfsr=True).
         seed: Random seed for LFSR sampling (used only if compute_lfsr=True).
@@ -71,27 +67,3 @@ def analyze(
         out["lfsr_df"] = lfsr_df
 
     return out
-
-
-def analyze_saved(
-    path: str,
-    *,
-    gene_names: Optional[Sequence[str]] = None,
-    perturbation_names: Optional[Sequence[str]] = None,
-    **kwargs,
-) -> dict:
-    """Load saved results from a directory and run analyze.
-
-    Args:
-        path: Results directory written by save_results().
-        gene_names: Gene names for table labels.
-        perturbation_names: Perturbation names for table labels.
-        **kwargs: Forwarded to analyze (pip_threshold, compute_lfsr, etc.).
-
-    Returns:
-        Same dict as analyze.
-    """
-    from .io import load_results
-
-    results = load_results(path)
-    return analyze(results, gene_names=gene_names, perturbation_names=perturbation_names, **kwargs)

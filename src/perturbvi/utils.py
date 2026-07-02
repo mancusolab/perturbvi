@@ -301,7 +301,7 @@ def analyze_output(
     """
     Produce results from output files.
 
-    Deprecated path: use ``perturbvi.analyze_saved`` instead.
+    Deprecated path: use ``perturbvi.load_results`` and ``perturbvi.analyze`` instead.
 
     Args:
         dir: Results directory

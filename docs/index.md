@@ -12,7 +12,6 @@ the perturbation effects that drive them.
   [**Installation**](#installation)
   | [**Example**](#current-python-api)
   | [**Notes**](#notes)
-  | [**Version**](#version-history)
   | [**Support**](#support)
   | [**Other Software**](#other-software)
 
@@ -105,52 +104,44 @@ save_results(fitted, path="results/")
 
 ### 3. Analyze
 
-Two ways to get to the same analysis tables, depending on whether you still have
-`fitted` in memory:
-
-| You have...                                          | Call                                    |
-|-------------------------------------------------------|------------------------------------------|
-| `fitted` in memory (just fit it)                       | `analyze(fitted, ...)`                    |
-| only a `results/` directory (new session, no refit)     | `analyze_saved("results/", ...)`          |
-
-Both accept the *same* optional keyword arguments and return the *same* dict of tables — the
-only difference is what you pass in first (an object vs. a path).
-
 ```python
 from perturbvi import analyze
 
 results = analyze(
     fitted,
-    gene_names=screen.gene_names,          # optional
+    gene_names=screen.gene_names,                  # optional
     perturbation_names=screen.perturbation_names,  # optional
-)
-```
-
-```python
-# Equivalent, but starting fresh from disk instead of the in-memory `fitted`
-# (e.g. in a new script the next day):
-from perturbvi import analyze_saved
-
-results = analyze_saved(
-    "results/",
-    gene_names=screen.gene_names,          # optional
-    perturbation_names=screen.perturbation_names,  # optional
+    compute_lfsr=False,                            # optional, default: False
 )
 ```
 
 `results` is a dict of DataFrames: `pip_df`, `pve_df`, `beta_df`, `p_hat_df`, `overall_effect_df`.
 
-**LFSR** is a separate, expensive computation and is *off by default* for both functions above.
-Turn it on explicitly, and check `results["lfsr_df"]` only after doing so:
+Analyzing results saved in an earlier session, without refitting — load, then analyze:
 
 ```python
-results = analyze(fitted, compute_lfsr=True, lfsr_iters=2000)
-# now results also has "lfsr_df"
+from perturbvi import load_results, analyze
+
+fitted = load_results("results/")
+results = analyze(
+    fitted,
+    gene_names=screen.gene_names,                  # optional
+    perturbation_names=screen.perturbation_names,  # optional
+    compute_lfsr=False,                            # optional, default: False
+)
 ```
 
-> **Note:** `gene_names`/`perturbation_names`, if given, must have the same length as the
-> corresponding dimension in `fitted` — there's currently no friendly error message for a
-> mismatch, just a raw pandas `ValueError`.
+> [!IMPORTANT]
+> `compute_lfsr=True` triggers an expensive Monte Carlo computation (`lfsr_iters`, default
+> `2000`). It only runs when explicitly requested. Turn it on to also get `results["lfsr_df"]`:
+> ```python
+> results = analyze(fitted, compute_lfsr=True, lfsr_iters=2000)
+> ```
+
+> [!WARNING]
+> `gene_names`/`perturbation_names`, if given, must have the same length as the corresponding
+> dimension in `fitted` — there's currently no friendly error message for a mismatch, just a
+> raw pandas `ValueError`.
 
 Low-level array API (unchanged):
 
@@ -161,14 +152,77 @@ results = infer(X, z_dim=12, l_dim=400, G=G, tau=800)
 
 ## Supported Input Formats
 
-| Format | How to use |
-|---|---|
-| `.h5ad` | `load_screen("file.h5ad", guide_key="col")` or `guide_obsm="key"` |
-| `10x-h5` | `load_screen("matrix.h5", format="10x-h5")` |
-| `10x-mex` | `load_screen("mex_dir/", format="10x-mex")` |
-| CSV/TSV | Use `infer()` directly after loading arrays manually |
+### `.h5ad` (AnnData)
 
-Zarr is not yet first-class. Covariate residualization for 10x formats is planned; use the Python API to populate `ScreenData.covariates` manually for now.
+Guides come from an `obs` column (`--guide-key`) or an existing `obsm` matrix (`--guide-obsm`):
+
+```bash
+perturbvi fit screen.h5ad \
+  --output results \
+  --z-dim 12 --l-dim 400 --tau 800 \
+  --guide-key perturbation
+```
+
+### `10x-h5` (10x feature-barcode HDF5)
+
+Guides are extracted from the file by feature type:
+
+```bash
+perturbvi fit filtered_feature_bc_matrix.h5 \
+  --format 10x-h5 \
+  --output results \
+  --z-dim 12 --l-dim 400 --tau 800 \
+  --expression-feature-type "Gene Expression" \
+  --guide-feature-type "CRISPR Guide Capture"
+```
+
+### `10x-mex` (10x MEX directory)
+
+Directory must contain `matrix.mtx`, `features.tsv`, and `barcodes.tsv`:
+
+```bash
+perturbvi fit path/to/mex_dir/ \
+  --format 10x-mex \
+  --output results \
+  --z-dim 12 --l-dim 400 --tau 800 \
+  --expression-feature-type "Gene Expression" \
+  --guide-feature-type "CRISPR Guide Capture"
+```
+
+### CSV/TSV
+
+No CLI support yet — use the low-level `infer()` API directly. `G` can be dense or sparse
+(`jax.experimental.sparse`); drop any non-targeting/control columns from the guide matrix
+before converting it. Expression is expected to already be residualized/QC'd — there's no
+`residualize_screen` step in this path, unlike `.h5ad`.
+
+```python
+import jax.numpy as jnp
+import pandas as pd
+from jax.experimental import sparse
+from perturbvi import infer, save_results, analyze
+
+# Expression: cells x genes. Assumed already residualized/preprocessed.
+X = jnp.asarray(pd.read_csv("expression.csv", index_col=0), dtype=jnp.float64)
+
+# Guides: cells x perturbations. Drop non-targeting/control columns first.
+guide = pd.read_csv("guides.csv", index_col=0)
+guide = guide.drop(columns=["non-targeting"], errors="ignore")
+G = sparse.bcoo_fromdense(jnp.asarray(guide, dtype=jnp.float64))
+
+fitted = infer(
+    X, z_dim=12, l_dim=500, G=G,
+    p_prior=0.1, standardize=True, tau=50,
+    init="pca", max_iter=1000, tol=1e-2,
+)
+
+save_results(fitted, path="results/")
+results = analyze(fitted, perturbation_names=guide.columns.tolist())
+```
+
+> [!NOTE]
+> Zarr is not yet first-class. Covariate residualization for 10x formats is planned; use the
+> Python API to construct `ScreenData.covariates` manually for now.
 
 ## Notes
 
@@ -179,10 +233,6 @@ Zarr is not yet first-class. Covariate residualization for 10x formats is planne
     with Mac M1 chip. To solve this, users need to initiate conda using
     [miniforge](https://github.com/conda-forge/miniforge), and then
     install `perturbvi` using `pip` in the desired environment.
-
-## Version History
-
-TBD
 
 ## Support
 
