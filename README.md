@@ -10,7 +10,6 @@
   [**Installation**](#installation)
   | [**Example**](#get-started-with-example)
   | [**Notes**](#notes)
-  | [**Version**](#version-history)
   | [**Support**](#support)
   | [**Other Software**](#other-software)
 
@@ -129,8 +128,9 @@ from perturbvi import analyze
 
 results = analyze(
     fitted,
-    gene_names=screen.gene_names,          # optional
+    gene_names=screen.gene_names,                  # optional
     perturbation_names=screen.perturbation_names,  # optional
+    compute_lfsr=False,                            # optional, default: False
 )
 ```
 
@@ -141,24 +141,25 @@ from perturbvi import analyze_saved
 
 results = analyze_saved(
     "results/",
-    gene_names=screen.gene_names,          # optional
+    gene_names=screen.gene_names,                  # optional
     perturbation_names=screen.perturbation_names,  # optional
+    compute_lfsr=False,                            # optional, default: False
 )
 ```
 
 `results` is a dict of DataFrames: `pip_df`, `pve_df`, `beta_df`, `p_hat_df`, `overall_effect_df`.
 
-**LFSR** is a separate, expensive computation and is *off by default* for both functions above.
-Turn it on explicitly, and check `results["lfsr_df"]` only after doing so:
+> [!IMPORTANT]
+> `compute_lfsr=True` triggers an expensive Monte Carlo computation (`lfsr_iters`, default
+> `2000`). It only runs when explicitly requested. Turn it on to also get `results["lfsr_df"]`:
+> ```python
+> results = analyze(fitted, compute_lfsr=True, lfsr_iters=2000)
+> ```
 
-```python
-results = analyze(fitted, compute_lfsr=True, lfsr_iters=2000)
-# now results also has "lfsr_df"
-```
-
-> **Note:** `gene_names`/`perturbation_names`, if given, must have the same length as the
-> corresponding dimension in `fitted` — there's currently no friendly error message for a
-> mismatch, just a raw pandas `ValueError`.
+> [!WARNING]
+> `gene_names`/`perturbation_names`, if given, must have the same length as the corresponding
+> dimension in `fitted` — there's currently no friendly error message for a mismatch, just a
+> raw pandas `ValueError`.
 
 Low-level array API (unchanged):
 
@@ -171,14 +172,59 @@ save_results(results, path="results/")
 
 ## Supported Input Formats
 
-| Format | Description |
-|---|---|
-| `.h5ad` | AnnData file. Use `--guide-key` (obs column) or `--guide-obsm` (obsm key) to specify guides. |
-| `10x-h5` | 10x feature-barcode HDF5 file. Guides extracted by feature type. |
-| `10x-mex` | 10x MEX directory (`matrix.mtx`, `features.tsv`, `barcodes.tsv`). |
-| CSV/TSV | Use the low-level `infer()` API directly for small files and tests. |
+### `.h5ad` (AnnData)
 
-Zarr is not yet first-class. Covariate residualization for 10x formats is planned; use the Python API to construct `ScreenData.covariates` manually for now.
+Guides come from an `obs` column (`--guide-key`) or an existing `obsm` matrix (`--guide-obsm`):
+
+```bash
+perturbvi fit screen.h5ad \
+  --output results \
+  --z-dim 12 --l-dim 400 --tau 800 \
+  --guide-key perturbation
+```
+
+### `10x-h5` (10x feature-barcode HDF5)
+
+Guides are extracted from the file by feature type:
+
+```bash
+perturbvi fit filtered_feature_bc_matrix.h5 \
+  --format 10x-h5 \
+  --output results \
+  --z-dim 12 --l-dim 400 --tau 800 \
+  --expression-feature-type "Gene Expression" \
+  --guide-feature-type "CRISPR Guide Capture"
+```
+
+### `10x-mex` (10x MEX directory)
+
+Directory must contain `matrix.mtx`, `features.tsv`, and `barcodes.tsv`:
+
+```bash
+perturbvi fit path/to/mex_dir/ \
+  --format 10x-mex \
+  --output results \
+  --z-dim 12 --l-dim 400 --tau 800 \
+  --expression-feature-type "Gene Expression" \
+  --guide-feature-type "CRISPR Guide Capture"
+```
+
+### CSV/TSV
+
+No CLI support yet — use the low-level `infer()` API directly for small files and tests:
+
+```python
+import numpy as np
+from perturbvi import infer
+
+X = np.loadtxt("expression.csv", delimiter=",")
+G = np.loadtxt("guides.csv", delimiter=",")
+results = infer(X, z_dim=12, l_dim=400, G=G, tau=800)
+```
+
+> [!NOTE]
+> Zarr is not yet first-class. Covariate residualization for 10x formats is planned; use the
+> Python API to construct `ScreenData.covariates` manually for now.
 
 
 ## Notes
@@ -190,10 +236,6 @@ Zarr is not yet first-class. Covariate residualization for 10x formats is planne
     with Mac M1 chip. To solve this, users need to initiate conda using
     [miniforge](https://github.com/conda-forge/miniforge), and then
     install `perturbvi` using `pip` in the desired environment.
-
-## Version History
-
-TBD
 
 ## Support
 
@@ -210,6 +252,8 @@ Lab](https://www.mancusolab.com/):
 -   [SuShiE](https://github.com/mancusolab/sushie): a Bayesian
     fine-mapping framework for molecular QTL data across multiple
     ancestries.
+-   [jaxQTL](https://github.com/mancusolab/jaxqtl): a scalable software 
+    for large-scale eQTL mapping using count-based models.
 -   [MA-FOCUS](https://github.com/mancusolab/ma-focus): a Bayesian
     fine-mapping framework using
     [TWAS](https://www.nature.com/articles/ng.3506) statistics across
@@ -220,6 +264,8 @@ Lab](https://www.mancusolab.com/):
 -   [twas_sim](https://github.com/mancusolab/twas_sim): a Python
     software to simulate [TWAS](https://www.nature.com/articles/ng.3506)
     statistics.
+-   [traceax](https://github.com/mancusolab/traceax): a Python
+    software to perform stochastic trace estimation for linear operators.
 -   [FactorGo](https://github.com/mancusolab/factorgo): a scalable
     variational factor analysis model that learns pleiotropic factors
     from GWAS summary statistics.
