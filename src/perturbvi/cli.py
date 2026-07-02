@@ -85,9 +85,9 @@ def _add_fit_args(p: argparse.ArgumentParser) -> None:
 
 def _add_analyze_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("results_dir", help="Directory produced by perturbvi fit or save_results()")
-    p.add_argument("--gene-names", default=None, help=".csv or .txt file with gene names, one per line")
+    p.add_argument("--genes", default=None, help=".csv or .txt file with gene names, one per line")
     p.add_argument(
-        "--perturbation-names", default=None,
+        "--perturbations", default=None,
         help=".csv or .txt file with perturbation names, one per line",
     )
     p.add_argument(
@@ -99,7 +99,6 @@ def _add_analyze_args(p: argparse.ArgumentParser) -> None:
         help="Compute LFSR (expensive Monte Carlo step; off by default)",
     )
     p.add_argument("--lfsr-iters", type=int, default=2000, help="Monte Carlo iterations for LFSR (default: 2000)")
-    p.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
     p.add_argument("--verbose", action="store_true", default=False)
 
 
@@ -182,8 +181,8 @@ def _cmd_fit(args, log) -> None:
         "source": screen.source,
         "X_shape": list(X_arr.shape),
         "G_shape": list(G_arr.shape),
-        "n_gene_names": len(screen.gene_names) if screen.gene_names else None,
-        "n_perturbation_names": len(screen.perturbation_names) if screen.perturbation_names else None,
+        "n_genes": len(screen.genes) if screen.genes else None,
+        "n_perturbations": len(screen.perturbations) if screen.perturbations else None,
         "n_cell_names": len(screen.cell_names) if screen.cell_names else None,
     }
     with open(out / "input_summary.json", "w") as f:
@@ -199,8 +198,8 @@ def _cmd_analyze(args, log) -> None:
     out = Path(args.output) if args.output else results_dir / "analysis"
     out.mkdir(parents=True, exist_ok=True)
 
-    gene_names = _read_names(args.gene_names) if args.gene_names else None
-    perturbation_names = _read_names(args.perturbation_names) if args.perturbation_names else None
+    genes = _read_names(args.genes) if args.genes else None
+    perturbations = _read_names(args.perturbations) if args.perturbations else None
 
     log.info(f"Loading results from: {results_dir}")
     fitted = load_results(str(results_dir))
@@ -208,14 +207,16 @@ def _cmd_analyze(args, log) -> None:
     log.info("Running analysis...")
     tables = analyze(
         fitted,
-        gene_names=gene_names,
-        perturbation_names=perturbation_names,
+        genes=genes,
+        perturbations=perturbations,
         compute_lfsr=args.compute_lfsr,
         lfsr_iters=args.lfsr_iters,
-        seed=args.seed,
+        path=str(results_dir),
     )
 
     for name, df in tables.items():
+        if df is None:
+            continue
         csv_path = out / f"{name}.csv"
         df.to_csv(csv_path)
         log.info(f"Saved {csv_path}")

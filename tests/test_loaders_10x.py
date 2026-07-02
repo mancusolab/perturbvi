@@ -36,8 +36,8 @@ def test_load_10x_splits_features():
     )
     assert screen.X.shape == (30, 10)
     assert screen.G.shape == (30, 3)
-    assert len(screen.gene_names) == 10
-    assert len(screen.perturbation_names) == 3
+    assert len(screen.genes) == 10
+    assert len(screen.perturbations) == 3
 
 
 def test_load_10x_missing_expression_type():

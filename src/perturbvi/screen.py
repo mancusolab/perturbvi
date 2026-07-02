@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 class ScreenData(NamedTuple):
     X: ArrayLike                          # cells × genes
     G: ArrayLike                          # cells × perturbations
-    gene_names: Optional[Sequence[str]]
-    perturbation_names: Optional[Sequence[str]]
+    genes: Optional[Sequence[str]]
+    perturbations: Optional[Sequence[str]]
     cell_names: Optional[Sequence[str]]
     source: Mapping[str, Any]             # loader metadata: path, format, layer, etc.
     covariates: Optional[ArrayLike] = None         # cells × covariates (raw values)
@@ -41,13 +41,13 @@ def validate_screen(screen: ScreenData) -> None:
     if empty_cols.size > 0:
         raise ValueError(f"G has all-zero columns at indices {empty_cols.tolist()}")
 
-    if screen.gene_names is not None and len(screen.gene_names) != X.shape[1]:
+    if screen.genes is not None and len(screen.genes) != X.shape[1]:
         raise ValueError(
-            f"gene_names has {len(screen.gene_names)} entries but X has {X.shape[1]} columns"
+            f"genes has {len(screen.genes)} entries but X has {X.shape[1]} columns"
         )
-    if screen.perturbation_names is not None and len(screen.perturbation_names) != G.shape[1]:
+    if screen.perturbations is not None and len(screen.perturbations) != G.shape[1]:
         raise ValueError(
-            f"perturbation_names has {len(screen.perturbation_names)} entries but G has {G.shape[1]} columns"
+            f"perturbations has {len(screen.perturbations)} entries but G has {G.shape[1]} columns"
         )
     if screen.cell_names is not None and len(screen.cell_names) != X.shape[0]:
         raise ValueError(

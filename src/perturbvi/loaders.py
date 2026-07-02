@@ -84,7 +84,7 @@ def _load_h5ad(
         if control_label is not None:
             G_df = G_df.drop(columns=[str(control_label)], errors="ignore")
         G = G_df.values.astype(np.float64)
-        perturbation_names = list(G_df.columns)
+        perturbations = list(G_df.columns)
     else:
         if guide_obsm not in adata.obsm:
             raise ValueError(
@@ -93,7 +93,7 @@ def _load_h5ad(
             )
         obsm_val = adata.obsm[guide_obsm]
         G = _to_dense(obsm_val).astype(np.float64)
-        perturbation_names = list(obsm_val.columns) if hasattr(obsm_val, "columns") else None
+        perturbations = list(obsm_val.columns) if hasattr(obsm_val, "columns") else None
 
     cov_matrix = None
     if covariates is not None:
@@ -122,8 +122,8 @@ def _load_h5ad(
     screen = ScreenData(
         X=X,
         G=G,
-        gene_names=list(adata.var_names),
-        perturbation_names=perturbation_names,
+        genes=list(adata.var_names),
+        perturbations=perturbations,
         cell_names=list(adata.obs_names),
         source=source,
         covariates=cov_matrix,
@@ -207,8 +207,8 @@ def _load_10x(
     screen = ScreenData(
         X=X,
         G=G,
-        gene_names=list(adata_exp.var_names),
-        perturbation_names=list(adata_guide.var_names),
+        genes=list(adata_exp.var_names),
+        perturbations=list(adata_guide.var_names),
         cell_names=list(adata.obs_names),
         source=source,
         covariates=cov_matrix,

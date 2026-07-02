@@ -8,7 +8,7 @@
 `perturbvi` is a scalable approach to infer regulatory modules through informative latent component model in the single-cell Perturb-seq data.
 
   [**Installation**](#installation)
-  | [**Example**](#get-started-with-example)
+  | [**Example**](#cli)
   | [**Notes**](#notes)
   | [**Support**](#support)
   | [**Other Software**](#other-software)
@@ -65,100 +65,57 @@ Analyze saved results:
 
 ```bash
 perturbvi analyze results \
-  --gene-names genes.csv \
-  --perturbation-names perturbations.csv \
+  --genes genes.csv \
+  --perturbations perturbations.csv \
   --output results/analysis
 
 # add --compute-lfsr to run the (expensive) LFSR step
 perturbvi analyze results \
-  --gene-names genes.csv \
-  --perturbation-names perturbations.csv \
+  --genes genes.csv \
+  --perturbations perturbations.csv \
   --compute-lfsr \
   --lfsr-iters 2000
 ```
 
 ## Python API
 
-The workflow always has 3 stages, run in order: **fit → save → analyze**.
-`gene_names` / `perturbation_names` are optional labels for the output tables — pass `None` (or omit them) to get integer index labels instead.
-
-### 1. Fit
+Workflow: **fit → analyze → save**. `genes` and `perturbations` are optional labels.
+Omit them to get integer index labels instead.
 
 ```python
-from perturbvi import load_screen, residualize_screen, fit_screen
+from perturbvi import load_screen, residualize_screen, fit_screen, analyze, save_results
 
-screen = load_screen(
-    "screen.h5ad",
-    guide_key="perturbation",
-    control_label="non-targeting",
-    covariates=["batch", "percent_mito", "n_counts"],  # optional
-)
+screen = load_screen("screen.h5ad", guide_key="perturbation", control_label="non-targeting")
+screen = residualize_screen(screen, categoricals=["batch"])  # optional, skip if already clean
 
-# Optional — skip this line entirely if your expression is already clean.
-screen = residualize_screen(screen, categoricals=["batch"])
+fitted = fit_screen(screen, z_dim=12, l_dim=400, tau=800)  # InferResults: params, elbo, pve, pip
 
-fitted = fit_screen(screen, z_dim=12, l_dim=400, tau=800)
-# `fitted` is an InferResults object (params, elbo, pve, pip)
-```
-
-### 2. Save
-
-```python
-from perturbvi import save_results
-
-save_results(fitted, path="results/")
-# writes: W.txt, pip.txt, pve.txt, params_file.pkl
-```
-
-### 3. Analyze
-
-```python
-from perturbvi import analyze
+save_results(fitted, path="results")  # W.txt, pip.txt, pve.txt, params_file.pkl
 
 results = analyze(
     fitted,
-    gene_names=screen.gene_names,                  # optional
-    perturbation_names=screen.perturbation_names,  # optional
-    compute_lfsr=False,                            # optional, default: False
+    genes=screen.genes,
+    perturbations=screen.perturbations,
+    compute_lfsr=True,
+    path="results",  # also writes results/lfsr.csv
 )
+# dict of DataFrames: pip_df, pve_df, beta_df, p_hat_df, overall_effect_df, lfsr
 ```
 
-`results` is a dict of DataFrames: `pip_df`, `pve_df`, `beta_df`, `p_hat_df`, `overall_effect_df`.
+> [!IMPORTANT]
+> `compute_lfsr` runs an expensive Monte Carlo step (`lfsr_iters`, default `2000`).
+> Call it when you need it.
 
-Analyzing results saved in an earlier session, without refitting — load, then analyze:
+To reopen later, without refitting or recomputing LFSR:
 
 ```python
 from perturbvi import load_results, analyze
 
-fitted = load_results("results/")
-results = analyze(
-    fitted,
-    gene_names=screen.gene_names,                  # optional
-    perturbation_names=screen.perturbation_names,  # optional
-    compute_lfsr=False,                            # optional, default: False
-)
+fitted = load_results("results")
+results = analyze(fitted, path="results")  # reuses results/lfsr.csv if present, else lfsr is None
 ```
 
-> [!IMPORTANT]
-> `compute_lfsr=True` triggers an expensive Monte Carlo computation (`lfsr_iters`, default
-> `2000`). It only runs when explicitly requested. Turn it on to also get `results["lfsr_df"]`:
-> ```python
-> results = analyze(fitted, compute_lfsr=True, lfsr_iters=2000)
-> ```
-
-> [!WARNING]
-> `gene_names`/`perturbation_names`, if given, must have the same length as the corresponding
-> dimension in `fitted` — there's currently no friendly error message for a mismatch, just a
-> raw pandas `ValueError`.
-
-Low-level array API (unchanged):
-
-```python
-from perturbvi import infer, save_results
-
-results = infer(X, z_dim=12, l_dim=400, G=G, tau=800)
-save_results(results, path="results/")
-```
+There is also a low-level `infer()` API. See [CSV/TSV](#csvtsv) below for a full example.
 
 ## Supported Input Formats
 
@@ -201,10 +158,10 @@ perturbvi fit path/to/mex_dir/ \
 
 ### CSV/TSV
 
-No CLI support yet — use the low-level `infer()` API directly. `G` can be dense or sparse
-(`jax.experimental.sparse`); drop any non-targeting/control columns from the guide matrix
-before converting it. Expression is expected to already be residualized/QC'd — there's no
-`residualize_screen` step in this path, unlike `.h5ad`.
+No CLI support yet. Use the low-level `infer()` API directly. `G` can be dense or sparse
+(`jax.experimental.sparse`). Drop non-targeting or control columns from the guide matrix
+before converting it. Expression should already be residualized and QC'd. Unlike `.h5ad`,
+this path has no `residualize_screen` step.
 
 ```python
 import jax.numpy as jnp
@@ -226,13 +183,13 @@ fitted = infer(
     init="pca", max_iter=1000, tol=1e-2,
 )
 
-save_results(fitted, path="results/")
-results = analyze(fitted, perturbation_names=guide.columns.tolist())
+save_results(fitted, path="results")
+results = analyze(fitted, perturbations=guide.columns.tolist())
 ```
 
 > [!NOTE]
-> Zarr is not yet first-class. Covariate residualization for 10x formats is planned; use the
-> Python API to construct `ScreenData.covariates` manually for now.
+> Zarr is not yet first-class. Covariate residualization also works for 10x formats: pass
+> `--covariate-file` (a barcode-indexed CSV/TSV) alongside `--covariates`.
 
 
 ## Notes

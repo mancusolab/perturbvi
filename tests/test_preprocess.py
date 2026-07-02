@@ -16,8 +16,8 @@ def _make_screen(n=50, g=10, p=3, seed=0, covariates=None, covariate_names=None)
     return ScreenData(
         X=X,
         G=G,
-        gene_names=None,
-        perturbation_names=None,
+        genes=None,
+        perturbations=None,
         cell_names=None,
         source={},
         covariates=covariates,

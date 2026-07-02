@@ -5,12 +5,10 @@
 [![Project generated with Hatch](https://img.shields.io/badge/%F0%9F%A5%9A-Hatch-4051b5.svg)](https://github.com/pypa/hatch)
 
 # perturbVI
-`perturbvi` is a scalable variational inference method for learning regulatory modules from single-cell
-Perturb-seq data. It fits a sparse latent factor model that jointly infers gene programs (factors) and
-the perturbation effects that drive them.
+`perturbvi` is a scalable approach to infer regulatory modules through informative latent component model in the single-cell Perturb-seq data.
 
   [**Installation**](#installation)
-  | [**Example**](#current-python-api)
+  | [**Example**](#cli)
   | [**Notes**](#notes)
   | [**Support**](#support)
   | [**Other Software**](#other-software)
@@ -20,135 +18,104 @@ the perturbation effects that drive them.
 ## Installation
 
 ``` bash
-pip install perturbvi
+# install perturbvi
+uv pip install perturbvi
+
+# help
+perturbvi --help
 ```
 
-Or from source:
-
-``` bash
-git clone https://github.com/mancusolab/perturbvi.git
-cd perturbvi
-pip install .
-```
 
 ## CLI
 
+Fit from an AnnData `.h5ad` file:
+
 ```bash
-# Fit from AnnData
 perturbvi fit screen.h5ad \
   --output results \
-  --z-dim 12 --l-dim 400 --tau 800 \
+  --z-dim 12 \
+  --l-dim 400 \
+  --tau 800 \
   --guide-key perturbation \
-  --control-label non-targeting
+  --control-label non-targeting \
+  --p-prior 0.1 \
+  --seed 1
 
-# with covariate residualization (h5ad only)
+# with covariate residualization
 perturbvi fit screen.h5ad \
   --output results \
   --z-dim 12 --l-dim 400 --tau 800 \
   --guide-key perturbation \
   --covariates batch percent_mito n_counts \
   --categoricals batch
+```
 
-# Fit from 10x feature-barcode H5
+Fit from a 10x feature-barcode H5 file:
+
+```bash
 perturbvi fit filtered_feature_bc_matrix.h5 \
   --format 10x-h5 \
   --output results \
-  --z-dim 12 --l-dim 400 --tau 800
+  --z-dim 12 \
+  --l-dim 400 \
+  --tau 800
+```
 
-# Analyze saved results
+Analyze saved results:
+
+```bash
 perturbvi analyze results \
-  --gene-names genes.csv \
-  --perturbation-names perturbations.csv \
+  --genes genes.csv \
+  --perturbations perturbations.csv \
   --output results/analysis
 
-# Analyze with LFSR (expensive)
+# add --compute-lfsr to run the (expensive) LFSR step
 perturbvi analyze results \
-  --gene-names genes.csv \
-  --perturbation-names perturbations.csv \
-  --compute-lfsr --lfsr-iters 2000
+  --genes genes.csv \
+  --perturbations perturbations.csv \
+  --compute-lfsr \
+  --lfsr-iters 2000
 ```
 
 ## Python API
 
-The workflow always has 3 stages, run in order: **fit → save → analyze**.
-`gene_names` / `perturbation_names` are optional labels for the output tables — pass `None`
-(or omit them) to get integer index labels instead.
-
-### 1. Fit
+Workflow: **fit → analyze → save**. `genes` and `perturbations` are optional labels.
+Omit them to get integer index labels instead.
 
 ```python
-from perturbvi import load_screen, residualize_screen, fit_screen
+from perturbvi import load_screen, residualize_screen, fit_screen, analyze, save_results
 
-screen = load_screen(
-    "screen.h5ad",
-    guide_key="perturbation",
-    control_label="non-targeting",
-    covariates=["batch", "percent_mito", "n_counts"],  # optional
-)
+screen = load_screen("screen.h5ad", guide_key="perturbation", control_label="non-targeting")
+screen = residualize_screen(screen, categoricals=["batch"])  # optional, skip if already clean
 
-# Optional — skip this line entirely if your expression is already clean.
-# Residualization happens first; standardization (in fit_screen) applies after.
-screen = residualize_screen(screen, categoricals=["batch"])
+fitted = fit_screen(screen, z_dim=12, l_dim=400, tau=800)  # InferResults: params, elbo, pve, pip
 
-fitted = fit_screen(screen, z_dim=12, l_dim=400, tau=800)
-# `fitted` is an InferResults object (params, elbo, pve, pip)
-```
-
-### 2. Save
-
-```python
-from perturbvi import save_results
-
-save_results(fitted, path="results/")
-```
-
-### 3. Analyze
-
-```python
-from perturbvi import analyze
+save_results(fitted, path="results")  # W.txt, pip.txt, pve.txt, params_file.pkl
 
 results = analyze(
     fitted,
-    gene_names=screen.gene_names,                  # optional
-    perturbation_names=screen.perturbation_names,  # optional
-    compute_lfsr=False,                            # optional, default: False
+    genes=screen.genes,
+    perturbations=screen.perturbations,
+    compute_lfsr=True,
+    path="results",  # also writes results/lfsr.csv
 )
+# dict of DataFrames: pip_df, pve_df, beta_df, p_hat_df, overall_effect_df, lfsr
 ```
 
-`results` is a dict of DataFrames: `pip_df`, `pve_df`, `beta_df`, `p_hat_df`, `overall_effect_df`.
+> [!IMPORTANT]
+> `compute_lfsr` runs an expensive Monte Carlo step (`lfsr_iters`, default `2000`).
+> Call it when you need it.
 
-Analyzing results saved in an earlier session, without refitting — load, then analyze:
+To reopen later, without refitting or recomputing LFSR:
 
 ```python
 from perturbvi import load_results, analyze
 
-fitted = load_results("results/")
-results = analyze(
-    fitted,
-    gene_names=screen.gene_names,                  # optional
-    perturbation_names=screen.perturbation_names,  # optional
-    compute_lfsr=False,                            # optional, default: False
-)
+fitted = load_results("results")
+results = analyze(fitted, path="results")  # reuses results/lfsr.csv if present, else lfsr is None
 ```
 
-> [!IMPORTANT]
-> `compute_lfsr=True` triggers an expensive Monte Carlo computation (`lfsr_iters`, default
-> `2000`). It only runs when explicitly requested. Turn it on to also get `results["lfsr_df"]`:
-> ```python
-> results = analyze(fitted, compute_lfsr=True, lfsr_iters=2000)
-> ```
-
-> [!WARNING]
-> `gene_names`/`perturbation_names`, if given, must have the same length as the corresponding
-> dimension in `fitted` — there's currently no friendly error message for a mismatch, just a
-> raw pandas `ValueError`.
-
-Low-level array API (unchanged):
-
-```python
-from perturbvi import infer
-results = infer(X, z_dim=12, l_dim=400, G=G, tau=800)
-```
+There is also a low-level `infer()` API. See [CSV/TSV](#csvtsv) below for a full example.
 
 ## Supported Input Formats
 
@@ -191,10 +158,10 @@ perturbvi fit path/to/mex_dir/ \
 
 ### CSV/TSV
 
-No CLI support yet — use the low-level `infer()` API directly. `G` can be dense or sparse
-(`jax.experimental.sparse`); drop any non-targeting/control columns from the guide matrix
-before converting it. Expression is expected to already be residualized/QC'd — there's no
-`residualize_screen` step in this path, unlike `.h5ad`.
+No CLI support yet. Use the low-level `infer()` API directly. `G` can be dense or sparse
+(`jax.experimental.sparse`). Drop non-targeting or control columns from the guide matrix
+before converting it. Expression should already be residualized and QC'd. Unlike `.h5ad`,
+this path has no `residualize_screen` step.
 
 ```python
 import jax.numpy as jnp
@@ -216,13 +183,14 @@ fitted = infer(
     init="pca", max_iter=1000, tol=1e-2,
 )
 
-save_results(fitted, path="results/")
-results = analyze(fitted, perturbation_names=guide.columns.tolist())
+save_results(fitted, path="results")
+results = analyze(fitted, perturbations=guide.columns.tolist())
 ```
 
 > [!NOTE]
-> Zarr is not yet first-class. Covariate residualization for 10x formats is planned; use the
-> Python API to construct `ScreenData.covariates` manually for now.
+> Zarr is not yet first-class. Covariate residualization also works for 10x formats: pass
+> `--covariate-file` (a barcode-indexed CSV/TSV) alongside `--covariates`.
+
 
 ## Notes
 
@@ -249,6 +217,8 @@ Lab](https://www.mancusolab.com/):
 -   [SuShiE](https://github.com/mancusolab/sushie): a Bayesian
     fine-mapping framework for molecular QTL data across multiple
     ancestries.
+-   [jaxQTL](https://github.com/mancusolab/jaxqtl): a scalable software 
+    for large-scale eQTL mapping using count-based models.
 -   [MA-FOCUS](https://github.com/mancusolab/ma-focus): a Bayesian
     fine-mapping framework using
     [TWAS](https://www.nature.com/articles/ng.3506) statistics across
@@ -259,6 +229,8 @@ Lab](https://www.mancusolab.com/):
 -   [twas_sim](https://github.com/mancusolab/twas_sim): a Python
     software to simulate [TWAS](https://www.nature.com/articles/ng.3506)
     statistics.
+-   [traceax](https://github.com/mancusolab/traceax): a Python
+    software to perform stochastic trace estimation for linear operators.
 -   [FactorGo](https://github.com/mancusolab/factorgo): a scalable
     variational factor analysis model that learns pleiotropic factors
     from GWAS summary statistics.

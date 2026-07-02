@@ -32,16 +32,16 @@ def test_load_h5ad_guide_key(h5ad_path):
     assert screen.X.shape[0] == 30
     assert screen.X.shape[1] == 10
     assert screen.G.shape[0] == 30
-    assert screen.gene_names is not None
+    assert screen.genes is not None
     assert screen.cell_names is not None
-    assert screen.perturbation_names is not None
+    assert screen.perturbations is not None
 
 
 def test_load_h5ad_control_label_dropped(h5ad_path):
     from perturbvi import load_screen
 
     screen = load_screen(str(h5ad_path), guide_key="perturbation", control_label="non-targeting")
-    assert "non-targeting" not in screen.perturbation_names
+    assert "non-targeting" not in screen.perturbations
 
 
 def test_load_h5ad_named_layer(h5ad_path):

@@ -125,7 +125,7 @@ def test_analyze_smoke(h5ad_path, tmp_path):
     assert len(csvs) > 0
     names = [f.name for f in csvs]
     assert "pip_df.csv" in names
-    assert "lfsr_df.csv" not in names
+    assert "lfsr.csv" not in names
 
 
 def test_analyze_smoke_with_lfsr(h5ad_path, tmp_path):
@@ -148,4 +148,4 @@ def test_analyze_smoke_with_lfsr(h5ad_path, tmp_path):
         "--lfsr-iters", "50",
     ])
 
-    assert (analyze_out / "lfsr_df.csv").exists()
+    assert (analyze_out / "lfsr.csv").exists()
