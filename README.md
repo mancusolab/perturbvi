@@ -80,10 +80,13 @@ perturbvi analyze results \
 
 ## Python API
 
-High-level path from file to results:
+The workflow always has 3 stages, run in order: **fit → save → analyze**.
+`gene_names` / `perturbation_names` are optional labels for the output tables — pass `None` (or omit them) to get integer index labels instead.
+
+### 1. Fit
 
 ```python
-from perturbvi import load_screen, residualize_screen, fit_screen, save_results, analyze_results
+from perturbvi import load_screen, residualize_screen, fit_screen
 
 screen = load_screen(
     "screen.h5ad",
@@ -92,24 +95,70 @@ screen = load_screen(
     covariates=["batch", "percent_mito", "n_counts"],  # optional
 )
 
-# optional — skip if expression is already clean
+# Optional — skip this line entirely if your expression is already clean.
 screen = residualize_screen(screen, categoricals=["batch"])
 
-results = fit_screen(screen, z_dim=12, l_dim=400, tau=800)
-
-save_results(results, path="results/")
-# writes: W.txt, pip.txt, pve.txt, params_file.pkl
-
-tables = analyze_results(
-    results,
-    gene_names=screen.gene_names,
-    perturbation_names=screen.perturbation_names,
-)
-# tables["pip_df"], tables["overall_effect_df"], ...
-
-# LFSR requires an explicit flag
-tables = analyze_results(results, compute_lfsr=True, lfsr_iters=2000)
+fitted = fit_screen(screen, z_dim=12, l_dim=400, tau=800)
+# `fitted` is an InferResults object (params, elbo, pve, pip)
 ```
+
+### 2. Save
+
+```python
+from perturbvi import save_results
+
+save_results(fitted, path="results/")
+# writes: W.txt, pip.txt, pve.txt, params_file.pkl
+```
+
+### 3. Analyze
+
+Two ways to get to the same analysis tables, depending on whether you still have
+`fitted` in memory:
+
+| You have...                                          | Call                                     |
+|--------------------------------------------------------|---------------------------------------------|
+| `fitted` in memory (just fit it)                        | `analyze(fitted, ...)`                       |
+| only a `results/` directory (new session, no refit)      | `analyze_saved("results/", ...)`             |
+
+Both accept the *same* optional keyword arguments and return the *same* dict of tables — the
+only difference is what you pass in first (an object vs. a path).
+
+```python
+from perturbvi import analyze
+
+results = analyze(
+    fitted,
+    gene_names=screen.gene_names,          # optional
+    perturbation_names=screen.perturbation_names,  # optional
+)
+```
+
+```python
+# Equivalent, but starting fresh from disk instead of the in-memory `fitted`
+# (e.g. in a new script the next day):
+from perturbvi import analyze_saved
+
+results = analyze_saved(
+    "results/",
+    gene_names=screen.gene_names,          # optional
+    perturbation_names=screen.perturbation_names,  # optional
+)
+```
+
+`results` is a dict of DataFrames: `pip_df`, `pve_df`, `beta_df`, `p_hat_df`, `overall_effect_df`.
+
+**LFSR** is a separate, expensive computation and is *off by default* for both functions above.
+Turn it on explicitly, and check `results["lfsr_df"]` only after doing so:
+
+```python
+results = analyze(fitted, compute_lfsr=True, lfsr_iters=2000)
+# now results also has "lfsr_df"
+```
+
+> **Note:** `gene_names`/`perturbation_names`, if given, must have the same length as the
+> corresponding dimension in `fitted` — there's currently no friendly error message for a
+> mismatch, just a raw pandas `ValueError`.
 
 Low-level array API (unchanged):
 

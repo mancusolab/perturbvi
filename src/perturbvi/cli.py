@@ -195,7 +195,7 @@ def _cmd_fit(args, log) -> None:
 
 
 def _cmd_analyze(args, log) -> None:
-    from perturbvi import analyze_results, load_results
+    from perturbvi import analyze_saved
 
     results_dir = Path(args.results_dir)
     out = Path(args.output) if args.output else results_dir / "analysis"
@@ -205,11 +205,9 @@ def _cmd_analyze(args, log) -> None:
     perturbation_names = _read_names(args.perturbation_names) if args.perturbation_names else None
 
     log.info(f"Loading results from: {results_dir}")
-    results = load_results(str(results_dir))
-
     log.info("Running analysis...")
-    tables = analyze_results(
-        results,
+    tables = analyze_saved(
+        str(results_dir),
         gene_names=gene_names,
         perturbation_names=perturbation_names,
         pip_threshold=args.pip_threshold,

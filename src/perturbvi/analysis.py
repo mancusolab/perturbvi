@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 
-def analyze_results(
+def analyze(
     results,
     *,
     gene_names: Optional[Sequence[str]] = None,
@@ -73,25 +73,25 @@ def analyze_results(
     return out
 
 
-def analyze_saved_results(
+def analyze_saved(
     path: str,
     *,
     gene_names: Optional[Sequence[str]] = None,
     perturbation_names: Optional[Sequence[str]] = None,
     **kwargs,
 ) -> dict:
-    """Load saved results from a directory and run analyze_results.
+    """Load saved results from a directory and run analyze.
 
     Args:
         path: Results directory written by save_results().
         gene_names: Gene names for table labels.
         perturbation_names: Perturbation names for table labels.
-        **kwargs: Forwarded to analyze_results (pip_threshold, compute_lfsr, etc.).
+        **kwargs: Forwarded to analyze (pip_threshold, compute_lfsr, etc.).
 
     Returns:
-        Same dict as analyze_results.
+        Same dict as analyze.
     """
     from .io import load_results
 
     results = load_results(path)
-    return analyze_results(results, gene_names=gene_names, perturbation_names=perturbation_names, **kwargs)
+    return analyze(results, gene_names=gene_names, perturbation_names=perturbation_names, **kwargs)
