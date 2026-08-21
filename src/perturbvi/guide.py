@@ -60,18 +60,6 @@ def _get_diag(G: SparseMatrix) -> Array:
     return jsparse.sparsify(jnp.sum)(G.matrix**2, axis=0).todense()  # type: ignore
 
 
-@dispatch
-def _wgt_sumsq(G: SparseMatrix, vector: Array) -> Array:
-    tmp = G.matrix * vector
-    return jsparse.sparsify(jnp.sum)(tmp**2)  # type: ignore
-
-
-@dispatch
-def _wgt_sumsq(G: Array, vector: Array) -> Array:
-    tmp = G * vector
-    return jnp.sum(tmp**2)
-
-
 _multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
 
 

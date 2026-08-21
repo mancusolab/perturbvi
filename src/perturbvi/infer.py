@@ -20,6 +20,7 @@ from jaxtyping import Array, ArrayLike
 from .annotation import AnnotationPriorModel, FixedPrior, PriorModel
 from .common import (
     DataMatrix,
+    ELBOResults,
     ModelParams,
 )
 from .factorloadings import FactorModel, LoadingModel
@@ -96,38 +97,11 @@ def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, para
     return params._replace(tau=u_tau)
 
 
-class ELBOResults(NamedTuple):
-    """Define the class of all components in ELBO.
-
-    **Arguments:**
-        elbo: the value of ELBO
-        expected_loglike: Expectation of log-likelihood
-        kl_factors: -KL divergence of Z
-        kl_loadings: -KL divergence of W
-        kl_guide: -KL divergence of B
-
-    """
-
-    elbo: Array
-    expected_loglike: Array
-    kl_factors: Array
-    kl_loadings: Array
-    kl_guide: Array
-
-    def __str__(self):
-        return (
-            f"ELBO = {self.elbo:.3f} | E[logl] = {self.expected_loglike:.3f} | "
-            f"KL[Z] = {self.kl_factors:.3f} | E_Q[KL[W]] + KL[Gamma] = {self.kl_loadings:.3f} | "
-            f"E_Q[KL[Beta]] + KL[Eta] = {self.kl_guide:.3f}|"
-        )
-
-
 def compute_elbo(
     X: DataMatrix,
     guide: GuideModel,
     factors: FactorModel,
     loadings: LoadingModel,
-    annotation: PriorModel,
     params: ModelParams,
 ) -> ELBOResults:
     """Create function to compute evidence lower bound (ELBO)
@@ -138,7 +112,6 @@ def compute_elbo(
     - `guide` [`GuideModel`]: The guide model
     - `factors` [`FactorModel`]: The factor model
     - `loadings` [`LoadingModel`]: The loading model
-    - `annotation` [`PriorModel`]: The prior annotation model
     - `params` [`ModelParams`]: The dictionary contains all the inferred parameters
 
     **Returns:**
@@ -193,7 +166,6 @@ def _inner_loop(
     params: ModelParams,
 ):
     # update annotation priors if any
-    params = annotation.init_state(params)
     params = annotation.update(params)
 
     # update loadings prior precision via ~Empirical Bayes and update variational params
@@ -211,53 +183,9 @@ def _inner_loop(
     params = _update_tau(X, factors, loadings, params)
 
     # compute elbo
-    elbo_res = compute_elbo(X, guide, factors, loadings, annotation, params)
+    elbo_res = compute_elbo(X, guide, factors, loadings, params)
 
     return elbo_res, params
-
-
-def _reorder_factors_by_pve(pve: Array, annotations: PriorModel, params: ModelParams) -> Tuple[Array, ModelParams]:
-    sorted_indices = jnp.argsort(pve)[::-1]
-    pve = pve[sorted_indices]
-
-    sorted_mu_z = params.mean_z[:, sorted_indices]
-    sorted_var_z = params.var_z[sorted_indices, sorted_indices]
-    sorted_mu_beta = params.mean_beta[:, sorted_indices]
-    sorted_var_beta = params.var_beta[:, sorted_indices]
-    sorted_p_hat = params.p_hat[sorted_indices, :]
-    sorted_mu_w = params.mean_w[:, sorted_indices, :]
-    sorted_var_w = params.var_w[:, sorted_indices]
-    sorted_tau_beta = params.tau_beta[sorted_indices]
-    sorted_alpha = params.alpha[:, sorted_indices, :]
-    sorted_tau_0 = params.tau_0[:, sorted_indices]
-    if isinstance(annotations, AnnotationPriorModel):
-        sorted_theta = params.theta[:, sorted_indices]
-        # sorted_pi = annotations.predict(ModelParams(theta=sorted_theta))  # type: ignore
-        sorted_pi = annotations.predict(params._replace(theta=sorted_theta))
-    else:
-        sorted_theta = None
-        sorted_pi = params.pi
-
-    params = ModelParams(
-        params.x_ssq,
-        sorted_mu_z,
-        sorted_var_z,
-        sorted_mu_w,
-        sorted_var_w,
-        sorted_alpha,
-        params.tau,
-        sorted_tau_0,
-        sorted_theta,
-        sorted_pi,
-        None,
-        sorted_mu_beta,
-        sorted_var_beta,
-        sorted_tau_beta,
-        params.p,
-        sorted_p_hat,
-    )
-
-    return pve, params
 
 
 def _init_params(
@@ -266,10 +194,8 @@ def _init_params(
     l_dim: int,
     X: DataMatrix,
     guide: GuideModel,
-    factors: FactorModel,
-    loadings: LoadingModel,
     annotations: PriorModel,
-    p_prior: float = 0.5,
+    p_prior: Optional[float] = 0.1,
     tau: float = 1.0,
     init: _init_type = "pca",
     verbose: bool = True,
@@ -285,9 +211,9 @@ def _init_params(
         log.info("✓ Base parameters initialized (5%)")
 
     # Random keys
-    keys = random.split(rng_key, 10)
+    keys = random.split(rng_key, 8)
     keys[0].block_until_ready()
-    rng_key, svd_key, mu_key, var_key, muw_key, varw_key, alpha_key, beta_key, var_beta_key, theta_key = keys
+    svd_key, mu_key, var_key, muw_key, varw_key, beta_key, var_beta_key, theta_key = keys
     if verbose:
         log.info("✓ Random keys setup (10%)")
 
@@ -326,8 +252,6 @@ def _init_params(
         log.info("✓ Loadings initialized (60%)")
 
     # Alpha and pi
-    # init_alpha = random.dirichlet(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
-    # init_alpha =jax.jit(random.dirichlet)(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
     init_alpha = jnp.full((l_dim, z_dim, p_dim), 1.0 / p_dim)
     if verbose:
         log.info("Avoid dirichlet process")
@@ -346,10 +270,20 @@ def _init_params(
         log.info("✓ Annotations setup complete (75%)")
 
     # Perturbation effects
-    n_dim, g_dim = guide.shape
+    _, g_dim = guide.shape
     tau_beta = jnp.ones((z_dim,))
     init_mu_beta = random.normal(beta_key, shape=(g_dim, z_dim)) * 1e-3
-    init_var_beta = (1 / tau_beta) * random.normal(var_beta_key, shape=(g_dim, z_dim)) ** 2
+    if isinstance(guide, DenseGuideModel):
+        # Dense guide regression uses point estimates without spike-and-slab
+        # selection. Keep the stored posterior consistent with that model so
+        # downstream analysis does not attenuate or randomly resample beta.
+        init_var_beta = jnp.zeros((g_dim, z_dim))
+        p_prior = None
+        p_hat = jnp.ones((z_dim, g_dim))
+    else:
+        init_var_beta = (1 / tau_beta) * random.normal(var_beta_key, shape=(g_dim, z_dim)) ** 2
+        p_prior = p_prior * jnp.ones(g_dim)
+        p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
     tau_beta.block_until_ready()
     init_mu_beta.block_until_ready()
     init_var_beta.block_until_ready()
@@ -358,9 +292,7 @@ def _init_params(
 
     # Priors
     if p_prior is not None:
-        p_prior = p_prior * jnp.ones(g_dim)
         p_prior.block_until_ready()
-    p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
     p_hat.block_until_ready()
     if verbose:
         log.info("✓ Priors setup complete (100%)")
@@ -554,7 +486,7 @@ def infer(
     l_dim: int,
     G: ArrayLike | sparse.JAXSparse,
     A: Optional[ArrayLike | sparse.JAXSparse] = None,
-    p_prior: Optional[float] = 0.5,
+    p_prior: Optional[float] = 0.1,
     tau: float = 1.0,
     standardize: bool = False,
     init: _init_type = "pca",
@@ -577,8 +509,9 @@ def infer(
         p_prior: Prior inclusion probability for perturbation effects. ``None``
             or zero selects deterministic dense guide regression.
         tau: Positive initial residual precision.
-        standardize: Center every expression column and scale it to unit
-            population variance. Constant columns are rejected.
+        standardize: Scale each expression column to unit population variance
+            after centering. Centering is always applied. Constant columns are
+            rejected when scaling is enabled.
         init: Latent-factor initialization, either ``"pca"`` or ``"random"``.
         learning_rate: Positive optimizer learning rate used only with ``A``.
         max_iter: Positive maximum number of variational iterations.
@@ -639,8 +572,6 @@ def infer(
     else:
         annotation = FixedPrior()
 
-    n, p = X.shape  # type: ignore
-
     # initialize PRNGkey and params
     rng_key = random.PRNGKey(seed)
     factors = FactorModel()
@@ -651,14 +582,13 @@ def infer(
         l_dim,
         X,
         guide,
-        factors,
-        loadings,
         annotation,
         p_prior,
         tau,
         init,
         verbose,
     )
+    params = annotation.init_state(params)
 
     #  core loop for inference
     elbo = -5e25
@@ -679,9 +609,11 @@ def infer(
 
         elbo = elbo_res.elbo
 
-    # compute PVE and reorder in descending value
+    # Compute PVE without changing the fitted factor order.
     pve = compute_pve(params)
-    pve, params = _reorder_factors_by_pve(pve, annotation, params)
+
+    # Optimizer state is not part of the fitted biological result.
+    params = params._replace(ann_state=None)
 
     # compute PIPs
     pip = compute_pip(params)

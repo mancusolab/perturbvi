@@ -1,5 +1,7 @@
 # pattern: Functional Core
 
+import pytest
+
 import jax.numpy as jnp
 
 from jax import random
@@ -48,3 +50,9 @@ def test_lfsr_runs_one_jitted_scan_per_chunk(monkeypatch):
 
     assert calls == [100, 100, 5]
     assert jnp.array_equal(lfsr, jnp.zeros((1, 1)))
+
+
+@pytest.mark.parametrize("iters", [0, -1, False, 1.5, "10"])
+def test_lfsr_rejects_invalid_iteration_counts(iters):
+    with pytest.raises(ValueError, match="iters must be a positive integer"):
+        compute_lfsr(random.PRNGKey(0), _zero_effect_params(), iters=iters)

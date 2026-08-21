@@ -32,7 +32,7 @@ def h5ad_path(tmp_path):
 def test_load_h5ad_guide_key(h5ad_path):
     from perturbvi import load_screen
 
-    screen = load_screen(str(h5ad_path), guide_key="perturbation")
+    screen = load_screen(str(h5ad_path), guide_key="perturbation", control_label="non-targeting")
     assert screen.X.shape[0] == 30
     assert screen.X.shape[1] == 10
     assert screen.G.shape[0] == 30
@@ -73,12 +73,21 @@ def test_load_h5ad_control_label_dropped(h5ad_path):
     assert "non-targeting" not in screen.perturbation_names
 
 
+def test_load_h5ad_requires_control_label_for_categorical_assignments(h5ad_path):
+    from perturbvi import load_screen
+
+    with pytest.raises(ValueError, match="control_label is required"):
+        load_screen(str(h5ad_path), guide_key="perturbation")
+
+
 def test_load_h5ad_named_layer(h5ad_path):
     from perturbvi import load_screen
 
-    screen = load_screen(str(h5ad_path), guide_key="perturbation", layer="counts")
+    screen = load_screen(
+        str(h5ad_path), guide_key="perturbation", control_label="non-targeting", layer="counts"
+    )
     # counts layer was X * 2, so values should differ from X layer
-    screen_x = load_screen(str(h5ad_path), guide_key="perturbation", layer="X")
+    screen_x = load_screen(str(h5ad_path), guide_key="perturbation", control_label="non-targeting", layer="X")
     assert not np.allclose(screen.X, screen_x.X)
 
 
@@ -86,7 +95,9 @@ def test_load_h5ad_missing_layer(h5ad_path):
     from perturbvi import load_screen
 
     with pytest.raises(ValueError, match="Layer 'bad_layer' not found"):
-        load_screen(str(h5ad_path), guide_key="perturbation", layer="bad_layer")
+        load_screen(
+            str(h5ad_path), guide_key="perturbation", control_label="non-targeting", layer="bad_layer"
+        )
 
 
 def test_load_h5ad_missing_guide_key(h5ad_path):
@@ -143,7 +154,12 @@ def test_load_h5ad_missing_guide_obsm(h5ad_path):
 def test_load_h5ad_covariates(h5ad_path):
     from perturbvi import load_screen
 
-    screen = load_screen(str(h5ad_path), guide_key="perturbation", covariates=["batch", "n_counts"])
+    screen = load_screen(
+        str(h5ad_path),
+        guide_key="perturbation",
+        control_label="non-targeting",
+        covariates=["batch", "n_counts"],
+    )
     assert screen.covariates is not None
     assert screen.covariates.shape == (30, 2)
     assert screen.covariate_names == ["batch", "n_counts"]
@@ -153,14 +169,21 @@ def test_load_h5ad_missing_covariate(h5ad_path):
     from perturbvi import load_screen
 
     with pytest.raises(ValueError, match="covariates not found in adata.obs"):
-        load_screen(str(h5ad_path), guide_key="perturbation", covariates=["does_not_exist"])
+        load_screen(
+            str(h5ad_path),
+            guide_key="perturbation",
+            control_label="non-targeting",
+            covariates=["does_not_exist"],
+        )
 
 
 def test_load_h5ad_auto_format(h5ad_path):
     from perturbvi import load_screen
 
     # auto format should detect .h5ad extension
-    screen = load_screen(str(h5ad_path), guide_key="perturbation", format="auto")
+    screen = load_screen(
+        str(h5ad_path), guide_key="perturbation", control_label="non-targeting", format="auto"
+    )
     assert screen.X.shape[1] == 10
 
 
@@ -168,7 +191,12 @@ def test_load_h5ad_metadata_path_raises(h5ad_path):
     from perturbvi import load_screen
 
     with pytest.raises(ValueError, match="metadata_path is not supported for h5ad"):
-        load_screen(str(h5ad_path), guide_key="perturbation", metadata_path="some_file.csv")
+        load_screen(
+            str(h5ad_path),
+            guide_key="perturbation",
+            control_label="non-targeting",
+            metadata_path="some_file.csv",
+        )
 
 
 def test_load_h5ad_rejects_missing_guide_labels(tmp_path):
@@ -182,11 +210,11 @@ def test_load_h5ad_rejects_missing_guide_labels(tmp_path):
     path = tmp_path / "missing.h5ad"
     adata.write_h5ad(path)
 
-    with pytest.raises(ValueError, match="Guide labels are missing"):
-        load_screen(str(path), guide_key="guide")
+    with pytest.raises(ValueError, match="Perturbation labels are missing"):
+        load_screen(str(path), guide_key="guide", control_label="g1")
 
-    screen = load_screen(str(path), guide_key="guide", missing_guide="unassigned")
-    np.testing.assert_array_equal(np.asarray(screen.G)[1], np.zeros(2))
+    screen = load_screen(str(path), guide_key="guide", control_label="g1", missing_guide="unassigned")
+    np.testing.assert_array_equal(np.asarray(screen.G)[1], np.zeros(1))
 
 
 def test_load_h5ad_rejects_missing_categorical_covariate(tmp_path):
@@ -204,7 +232,7 @@ def test_load_h5ad_rejects_missing_categorical_covariate(tmp_path):
     adata.write_h5ad(path)
 
     with pytest.raises(ValueError, match="missing values"):
-        load_screen(str(path), guide_key="guide", covariates=["batch"])
+        load_screen(str(path), guide_key="guide", control_label="g1", covariates=["batch"])
 
 
 def test_load_h5ad_rejects_unknown_control_label(h5ad_path):
@@ -224,5 +252,5 @@ def test_load_h5ad_preserves_sparse_expression(tmp_path):
     )
     path = tmp_path / "sparse.h5ad"
     adata.write_h5ad(path)
-    screen = load_screen(str(path), guide_key="guide")
+    screen = load_screen(str(path), guide_key="guide", control_label="g1")
     assert isinstance(screen.X, jax_sparse.JAXSparse)

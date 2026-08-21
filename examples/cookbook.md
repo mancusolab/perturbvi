@@ -9,14 +9,21 @@ PerturbVI uses a cell-by-gene expression matrix `X` and a matching
 cell-by-perturbation design matrix `G`. Controls are all-zero rows in `G`;
 combination perturbations have more than one active column.
 
-`load_screen` can build `G` from a perturbation label in AnnData `obs` or read a
-prepared matrix from `obsm`. For 10x data, it aligns expression with prepared
-assignments by barcode. Covariates are optional and are used only when
+`load_screen()` can build `G` from one perturbation label per cell in AnnData
+`obs`, or read an existing binary or multi-hot matrix from `obsm`. For 10x
+data, it matches expression barcodes to a metadata table containing one
+perturbation label per cell. Covariates are optional and are used only when
 residualization is requested.
+
+When `guide_key` supplies labels, pass `control_label` so control cells become
+all-zero rows in `G`. A prepared guide matrix already encodes those rows and
+does not require `control_label`.
 
 ## Shared function
 
 Define this function once before running any of the dataset examples.
+The Python functions return objects; this helper explicitly saves the fitted
+model and analysis tables. The CLI performs those save steps automatically.
 
 ```python
 from pathlib import Path
@@ -78,18 +85,15 @@ def run_perturbvi(
     )
 
     output = Path(output_dir)
-    save_results(
+    save_results(results, str(output))
+    tables = analyze(
         results,
-        str(output),
         gene_names=screen.gene_names,
         perturbation_names=screen.perturbation_names,
     )
-    tables = analyze(str(output))
-    analysis_dir = output / "analysis"
-    analysis_dir.mkdir(parents=True, exist_ok=True)
     for name, table in tables.items():
         if isinstance(table, pd.DataFrame):
-            table.to_csv(analysis_dir / f"{name}.csv")
+            table.to_csv(output / f"{name}.csv")
             if verbose:
                 print(f"analysis_table: {name}, shape={table.shape}")
 
@@ -98,6 +102,8 @@ def run_perturbvi(
 
 The defaults above keep these examples short. Set `z_dim`, `l_dim`,
 `max_iter`, and `tau` for the analysis you intend to run.
+`fit_screen()` always centers expression features and scales them to unit
+variance by default. Pass `standardize=False` to center without scaling.
 
 ## Preparing raw expression
 
@@ -125,9 +131,9 @@ sc.pp.log1p(adata)
 ```
 
 Do not repeat this step when the selected expression matrix is already
-normalized. Perturbation labels and controls must come from the experiment's
-prepared assignments. Change the mitochondrial-gene mask if the annotation
-does not use `MT-` symbols.
+normalized. Perturbation and control labels must come from upstream guide
+calling or curated experiment metadata. Change the mitochondrial-gene mask if
+the annotation does not use `MT-` symbols.
 
 Download each dataset from the source linked in its section. Set `DATA` to the
 directory containing your prepared files and change the example filenames if
@@ -158,6 +164,9 @@ This workflow uses a cell-by-gene expression table, a cell-by-guide table, and
 a one-column gene-symbol file. `Nontargeting` is the control column in
 `luhmes_G.csv`; PerturbVI removes that column from `G` and treats its cells as
 controls. The expression and guide tables must use the same unique cell names.
+The `--gene-names` option is used here because the gene symbols are stored in a
+separate file. It replaces the gene labels in the analysis tables without
+changing the fit.
 
 ```bash
 perturbvi fit luhmes_exp.csv \
@@ -171,32 +180,25 @@ perturbvi fit luhmes_exp.csv \
 
 perturbvi analyze results \
   --gene-names luhmes_gene_symbol.csv \
-  --pip-threshold 0.9 \
-  --lfsr-threshold 0.05 \
   --compute-lfsr \
   --verbose
 ```
 
-The fit is saved under `results`, including `params_file.pkl`. The analysis
-tables are saved under `results/analysis`.
+The fit and analysis tables are saved under `results`, including
+`params_file.pkl`. Analysis uses the built-in cutoffs: PIP at least `0.9` and
+LFSR at most `0.05`.
 
 ```python
 from pathlib import Path
 
 import pandas as pd
 
-analysis = Path("results/analysis")
+results = Path("results")
+pip = pd.read_csv(results / "pip.csv", index_col=0)
+lfsr = pd.read_csv(results / "lfsr.csv", index_col=0)
 
-pip_summary = pd.read_csv(analysis / "pip_summary.csv", index_col=0)
-num_deg_per_w = pip_summary.set_index("factor")["n_pip_significant"]
-
-lfsr_hits = pd.read_csv(analysis / "lfsr_significant.csv", index_col=0)
-perturbations = pd.read_csv(analysis / "beta.csv", index_col=0).index
-num_deg_per_perturbed_gene = (
-    lfsr_hits.groupby("perturbation")
-    .size()
-    .reindex(perturbations, fill_value=0)
-)
+num_deg_per_w = (pip >= 0.9).sum(axis=0)
+num_deg_per_perturbed_gene = (lfsr <= 0.05).sum(axis=0)
 
 print(num_deg_per_w)
 print(num_deg_per_perturbed_gene)
@@ -206,7 +208,7 @@ print(num_deg_per_perturbed_gene)
 
 [scPerturb](https://www.sanderlab.org/scPerturb/) distributes harmonized H5AD
 files with expression in `X` and perturbation metadata in `obs`. The examples
-below use its published assignments; no guide calls are inferred by PerturbVI.
+below use its published cell-level labels; PerturbVI does not call guides.
 The covariates and experimental designs differ, so each has its own short
 block.
 
@@ -370,7 +372,7 @@ The source file, `SrivatsanTrapnell2020_sciplex2.h5ad`, was downloaded from the
 experiment is described in the original [Science
 paper](https://pmc.ncbi.nlm.nih.gov/articles/PMC7289078/).
 
-Drug and dose are combined into the prepared `perturbation` label. Sequencing
+Drug and dose are combined into the `perturbation` label. Sequencing
 depth and mitochondrial percentage are numeric residualization covariates.
 
 ```python

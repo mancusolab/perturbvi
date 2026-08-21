@@ -60,8 +60,9 @@ def test_run_perturbvi_executes_complete_saved_workflow(tmp_path):
     assert results.pip.shape == (1, 6)
     assert tables["beta"].shape == (2, 1)
     assert (output / "params_file.pkl").is_file()
-    assert (output / "gene_names.txt").is_file()
-    assert (output / "analysis" / "pip.csv").is_file()
+    assert not (output / "gene_names.txt").exists()
+    assert not (output / "perturbation_names.txt").exists()
+    assert (output / "pip.csv").is_file()
 
 
 def test_run_perturbvi_rejects_unloaded_categorical_covariate(tmp_path):

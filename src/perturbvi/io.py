@@ -21,46 +21,19 @@ log.setLevel(logging.INFO)
 __all__ = ["save_results", "load_results"]
 
 
-def _validated_names(names, expected: int, label: str):
-    if names is None:
-        return None
-    names = list(names)
-    if len(names) != expected:
-        raise ValueError(f"{label} has {len(names)} entries; expected {expected}")
-    if np.asarray(pd.isna(names), dtype=bool).any():
-        raise ValueError(f"{label} contains missing values")
-    values = [str(name) for name in names]
-    if len(set(values)) != len(values):
-        raise ValueError(f"{label} contains duplicate names")
-    if any("\n" in value or "\r" in value for value in values):
-        raise ValueError(f"{label} may not contain newline characters")
-    return values
-
-
-def _write_names(path: Path, values, label: str) -> None:
-    (path / f"{label}.txt").write_text("\n".join(values) + "\n", encoding="utf-8")
-
-
 def save_results(
     results: InferResults,
     path: str,
-    *,
-    gene_names=None,
-    perturbation_names=None,
 ) -> None:
-    """Persist a fit using stable filenames and optional name metadata.
+    """Persist a fit using stable model filenames.
 
     The directory is created when needed. ``W.txt``, ``pip.txt``, ``pve.txt``,
-    and ``params_file.pkl`` retain their historical names. Optional labels are
-    written to ``gene_names.txt`` and ``perturbation_names.txt`` for automatic
-    saved-results analysis.
+    and ``params_file.pkl`` retain their historical names.
+
+    Args:
+        results: Fitted PerturbVI results.
+        path: Output directory.
     """
-    gene_names = _validated_names(gene_names, results.W.shape[1], "gene_names")
-    perturbation_names = _validated_names(
-        perturbation_names,
-        results.params.mean_beta.shape[0],
-        "perturbation_names",
-    )
     output = Path(path)
     output.mkdir(parents=True, exist_ok=True)
     log.info("Saving PerturbVI results")
@@ -70,11 +43,6 @@ def save_results(
     np.savetxt(output / "pve.txt", np.asarray(results.pve))
     with (output / "params_file.pkl").open("wb") as params_file:
         pickle.dump(results.params, params_file)
-
-    if gene_names is not None:
-        _write_names(output, gene_names, "gene_names")
-    if perturbation_names is not None:
-        _write_names(output, perturbation_names, "perturbation_names")
 
     log.info(f"Results saved successfully at {output}")
 
@@ -105,36 +73,6 @@ def load_results(path: str) -> InferResults:
             raise ValueError(f"{name} contains non-finite values")
 
     return InferResults(params=params, elbo=None, pve=pve, pip=pip)
-
-
-def save_pip(results: InferResults, gene_symbol: Optional[list] = None, filepath: Optional[str] = None) -> pd.DataFrame:
-    """Create a DataFrame of posterior inclusion probabilities (PIPs) and optionally save to CSV.
-
-    Args:
-        results: InferResults object containing inference results
-        gene_symbol: Optional list of gene symbols to use as row indices. If None, uses numeric indices
-        filepath: Optional path to save CSV file. If provided, saves DataFrame to this location
-
-    Returns:
-        pd.DataFrame: DataFrame containing PIP values with labeled columns and indices
-    """
-    z_dim, p_dim = results.params.W.shape
-    # Create column names in format 'w0', 'w1', etc.
-    column_names = [f"w{i}" for i in range(z_dim)]
-
-    # Create DataFrame with appropriate indices
-    if gene_symbol is not None:
-        if len(gene_symbol) != p_dim:
-            raise ValueError(f"Length of gene_symbol ({len(gene_symbol)}) must match number of genes ({p_dim})")
-        pip_df = pd.DataFrame(results.pip.T, columns=column_names, index=gene_symbol)
-    else:
-        pip_df = pd.DataFrame(results.pip.T, columns=column_names)
-
-    # Save to CSV if filepath is provided
-    if filepath is not None:
-        pip_df.to_csv(filepath)
-
-    return pip_df
 
 
 # plot beta
@@ -190,7 +128,7 @@ def plot_beta(
     top_values = df[column].abs().nlargest(n)
     top_indices = top_values.index
     # draw the horizontal line
-    top_value = df[column].abs().nlargest(n)[-1]
+    top_value = top_values.iloc[-1]
 
     # Use numeric indices for plotting
     plt.scatter(numeric_indices, df[column], color="grey", alpha=0.7)

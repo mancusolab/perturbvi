@@ -11,8 +11,8 @@ import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import lineax as lx
 
-from jax._src.dtypes import JAXType  # ug...
 from jax.experimental import sparse
+from jax.typing import DTypeLike
 from jaxtyping import Array, ArrayLike, Float, Num
 
 
@@ -37,7 +37,7 @@ def _get_mean_terms(geno: Array, covar: Array) -> Array:
     return beta
 
 
-def sparse_column_variance(geno: sparse.JAXSparse, dense_dtype: JAXType):
+def sparse_column_variance(geno: sparse.JAXSparse, dense_dtype: DTypeLike):
     # def _inner(_, variant):
     #     var_idx = jnp.mean(variant **2) - jnp.mean(variant) ** 2
     #     return _, var_idx
@@ -153,7 +153,7 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
             )
 
     @property
-    def dense_dtype(self) -> JAXType:
+    def dense_dtype(self) -> DTypeLike:
         return self.out_structure().dtype
 
     def mv(self, vector: Num[ArrayLike, " p"]) -> Float[Array, " n"]:

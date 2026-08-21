@@ -1,12 +1,12 @@
 # pattern: Functional Core
 
 import logging
+import numbers
 
 from datetime import datetime
 from functools import partial
 
 import numpy as np
-import pandas as pd
 
 import equinox as eqx
 import jax.scipy.special as jspec
@@ -212,8 +212,11 @@ def compute_lfsr(key: Array, params: ModelParams, iters: int = 2000) -> Array:
     Arguments:
         key: JAX random key
         params: The parameters of the model
-        iters: Number of iterations (default=2000)
+        iters: Positive number of iterations (default=2000)
     """
+    if isinstance(iters, bool) or not isinstance(iters, numbers.Integral) or iters <= 0:
+        raise ValueError(f"iters must be a positive integer; received {iters!r}")
+
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log.info(f"Start computing LFSR at {current_time}")
 
@@ -247,45 +250,3 @@ def compute_lfsr(key: Array, params: ModelParams, iters: int = 2000) -> Array:
     log.info(f"Finished computing LFSR at {current_time}")
 
     return lfsr
-
-
-def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
-    """Create a function to give a quick summary of PIPs
-
-    Args:
-        pip:the pip matrix, a ndarray from results object returned by
-        infer.perturbvi
-
-    """
-    z_dim, p_dim = pip.shape
-    results = []
-
-    log.info(f"Of {p_dim} features from the data, PerturbVI identifies:")
-    for k in range(z_dim):
-        num_signal = jnp.where(pip[k, :] >= rho)[0].shape[0]
-        num_zero = jnp.where(pip[k, :] < rho_prime)[0].shape[0]
-        log.info(
-            f"Component {k} has {num_signal} features with pip>{rho}; and {num_zero} features with pip<{rho_prime}"
-        )
-        results.append([num_signal, num_zero])
-
-    df = pd.DataFrame(results, columns=["num_signal", "num_zero"])
-
-    # Calculate and print mean and standard deviation for each column
-    mean_signal = df["num_signal"].mean()
-    std_signal = df["num_signal"].std()
-    mean_zero = df["num_zero"].mean()
-    std_zero = df["num_zero"].std()
-
-    log.info(f"Mean and standard deviation for num_signal: {mean_signal}, {std_signal}")
-    log.info(f"Mean and standard deviation for num_zero: {mean_zero}, {std_zero}")
-
-    return df
-
-
-def find_top_genes(df, pip_cutoff=0.9):
-    high_value_genes = {}
-    for column in df.columns:
-        high_values = df[df[column] > pip_cutoff].index.tolist()
-        high_value_genes[column] = high_values
-    return high_value_genes

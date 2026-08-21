@@ -87,7 +87,7 @@ def test_load_10x_missing_feature_types_column(tmp_path):
 
 
 def test_load_screen_10x_requires_metadata():
-    with pytest.raises(ValueError, match="requires one barcode-indexed metadata_path"):
+    with pytest.raises(ValueError, match="requires barcode-indexed metadata"):
         load_screen("fake.h5", format="10x-h5")
 
 

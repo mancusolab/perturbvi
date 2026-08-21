@@ -40,3 +40,18 @@ def test_fit_screen_rejects_all_zero_g():
     screen = ScreenData(X=X, G=G_bad)
     with pytest.raises(ValueError, match="all-zero"):
         fit_screen(screen, **_KWARGS)
+
+
+def test_fit_screen_supports_annotation_prior():
+    X, G = _make_data()
+    screen = ScreenData(X=X, G=G)
+    annotations = np.column_stack((np.ones(X.shape[1]), np.arange(X.shape[1]) % 2))
+
+    result = fit_screen(
+        screen,
+        **(_KWARGS | {"max_iter": 1}),
+        A=annotations,
+        learning_rate=5e-3,
+    )
+
+    assert np.isfinite(np.asarray(result.pip)).all()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import namedtuple
-from typing import Any, Mapping, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Mapping, Optional, Sequence, TYPE_CHECKING, Union
 
 import numpy as np
 import pandas as pd
@@ -192,15 +192,37 @@ def fit_screen(
     tol: float = 1e-2,
     max_iter: int = 500,
     seed: int = 0,
-    A=None,
+    A: Optional[Union[ArrayLike, jax_sparse.JAXSparse]] = None,
     learning_rate: float = 1e-2,
     verbose: bool = False,
 ) -> "InferResults":
-    """Fit a validated screen and return the low-level :class:`InferResults`.
+    """Fit a validated screen and return :class:`InferResults`.
 
-    This is a thin high-level boundary: it validates ``screen`` and forwards
-    all numerical controls to :func:`perturbvi.infer` without changing the
-    result type. Optional residualization must be performed first.
+    Optional residualization must be performed before calling this function.
+    Expression features are always centered before fitting. When
+    ``standardize=True``, centered features are also divided by their
+    population standard deviation.
+
+    Args:
+        screen: Validated expression, perturbation design, and metadata.
+        z_dim: Number of latent factors.
+        l_dim: Number of single effects per factor.
+        tau: Positive initial residual precision.
+        p_prior: Prior inclusion probability for perturbation effects.
+        standardize: Scale centered expression features to unit population
+            variance. Centering is always applied.
+        init: Latent-factor initialization, ``"random"`` or ``"pca"``.
+        tol: Positive absolute convergence tolerance.
+        max_iter: Positive maximum number of inference iterations.
+        seed: Random seed.
+        A: Optional gene-by-annotation matrix for annotation-informed loading
+            priors. Its rows must follow the gene order in ``screen.X``.
+        learning_rate: Positive optimizer learning rate used only when ``A``
+            is provided.
+        verbose: Report inference progress.
+
+    Returns:
+        Fitted parameters, ELBO, PVE, and PIP values.
     """
     from .infer import infer
 

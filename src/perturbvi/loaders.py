@@ -135,20 +135,21 @@ def _guides_from_labels(
 ) -> tuple[np.ndarray, list[str]]:
     if missing_guide not in _MISSING_GUIDE_POLICIES:
         raise ValueError(f"Unknown missing_guide policy '{missing_guide}'")
+    if control_label is None:
+        raise ValueError("control_label is required when constructing guides from categorical perturbation labels")
     missing = labels.isna()
     if missing.any() and missing_guide == "error":
         raise ValueError(
-            f"Guide labels are missing for {int(missing.sum())} cells. "
+            f"Perturbation labels are missing for {int(missing.sum())} cells. "
             "Set missing_guide='unassigned' to keep them as all-zero guide rows."
         )
 
     guide_frame = pd.get_dummies(labels.astype("string"), dummy_na=False, dtype=np.float64)
     guide_frame.columns = guide_frame.columns.astype(str)
-    if control_label is not None:
-        control_label = str(control_label)
-        if control_label not in guide_frame.columns:
-            raise ValueError(f"control_label '{control_label}' was not present in the guide labels")
-        guide_frame = guide_frame.drop(columns=[control_label])
+    control_label = str(control_label)
+    if control_label not in guide_frame.columns:
+        raise ValueError(f"control_label '{control_label}' was not present in the perturbation labels")
+    guide_frame = guide_frame.drop(columns=[control_label])
     if guide_frame.shape[1] == 0:
         raise ValueError("Guide construction produced no perturbation columns")
     return guide_frame.to_numpy(dtype=np.float64), guide_frame.columns.tolist()
@@ -419,7 +420,7 @@ def _load_delimited(
     cell_names = expression.index.astype(str).tolist()
 
     if guide_path is not None and guide_key is not None:
-        raise ValueError("Provide a guide matrix or guide labels, not both")
+        raise ValueError("Provide a guide matrix or perturbation labels, not both")
     if guide_path is None and guide_key is None:
         raise ValueError("Delimited input requires guide_path or guide_key with metadata_path")
 
@@ -564,7 +565,7 @@ def _load_10x_request(path: Path, request: _LoadRequest) -> ScreenData:
     if request.layer != "X":
         raise ValueError("layer= is only applicable to h5ad input")
     if request.metadata_path is None:
-        raise ValueError("10x input requires one barcode-indexed metadata_path with confident guide labels")
+        raise ValueError("10x input requires barcode-indexed metadata with one perturbation label per cell")
     if request.guide_key is None:
         raise ValueError("guide_key is required with metadata_path for 10x input")
 
@@ -586,7 +587,7 @@ def _load_10x_request(path: Path, request: _LoadRequest) -> ScreenData:
 
 def _load_delimited_request(path: Path, request: _LoadRequest) -> ScreenData:
     if request.guide_path is not None and request.guide_key is not None:
-        raise ValueError("Provide a guide matrix or guide labels, not both")
+        raise ValueError("Provide a guide matrix or perturbation labels, not both")
     if request.guide_path is None and request.guide_key is None:
         raise ValueError("Delimited input requires guide_path or guide_key with metadata_path")
     if request.guide_key is not None and request.metadata_path is None:
@@ -628,8 +629,8 @@ def load_screen(
     """Load and validate a perturbation screen from a supported file format.
 
     AnnData accepts exactly one of ``guide_key`` or ``guide_obsm``. 10x H5/MEX
-    requires one barcode-indexed ``metadata_path`` with a confident
-    ``guide_key`` label and any requested covariates. The metadata rows may
+    requires one barcode-indexed ``metadata_path`` with one perturbation label
+    per cell in ``guide_key`` and any requested covariates. The metadata rows may
     define an analyzed barcode subset. Small CSV/TSV expression tables accept
     either ``guide_path`` or a ``guide_key`` in ``metadata_path``.
     Sparse AnnData and 10x expression matrices remain JAX sparse.
@@ -639,15 +640,17 @@ def load_screen(
         format: ``auto``, ``anndata``, ``h5ad``, ``10x-h5``, ``10x-mex``,
             ``csv``, or ``tsv``.
         layer: AnnData expression source; ``X`` selects ``adata.X``.
-        guide_key: Guide-label column in AnnData obs or delimited metadata.
+        guide_key: Per-cell perturbation-label column in AnnData obs or metadata.
         guide_obsm: AnnData obsm key containing an existing guide matrix.
-        control_label: Guide label or named guide column to exclude.
+        control_label: Control category to exclude. Required with ``guide_key``;
+            optional for a prepared guide matrix, where controls may already be
+            represented by all-zero rows.
         missing_guide: Reject missing labels with ``error`` (default), or keep
             them as all-zero rows with ``unassigned``.
         expression_feature_type: 10x expression feature type.
         covariates: Metadata columns to retain for later residualization.
         guide_path: Cell-by-guide CSV/TSV used with delimited expression.
-        metadata_path: Cell-indexed CSV/TSV containing guide labels and/or
+        metadata_path: Cell-indexed CSV/TSV containing perturbation labels and/or
             covariates. For 10x input, its rows may select a barcode subset.
         header: Header row passed to delimited matrix readers.
         index_col: Cell-name column passed to delimited matrix readers.

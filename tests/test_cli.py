@@ -51,13 +51,68 @@ def test_analyze_missing_results_dir():
         main(["analyze"])  # no results_dir
 
 
+def test_fit_help_groups_input_modes(capsys):
+    from perturbvi.cli import main
+
+    with pytest.raises(SystemExit) as error:
+        main(["fit", "--help"])
+
+    assert error.value.code == 0
+    help_text = capsys.readouterr().out
+    for heading in (
+        "required fit arguments",
+        "perturbation assignments",
+        "preprocessing",
+        "model",
+        "advanced input",
+        "runtime",
+        "Input recipes",
+    ):
+        assert heading in help_text
+
+
+@pytest.mark.parametrize("removed_flag", ["--guide-key", "--guide-obsm", "--metadata", "--layer", "--missing-guide"])
+def test_fit_rejects_removed_cli_flags(removed_flag):
+    from perturbvi.cli import main
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "fit",
+                "input.h5ad",
+                "--output",
+                "out",
+                "--z-dim",
+                "1",
+                "--l-dim",
+                "1",
+                "--tau",
+                "1",
+                removed_flag,
+                "value",
+            ]
+        )
+
+    assert error.value.code == 2
+
+
+def test_analyze_help_has_no_verbose_flag(capsys):
+    from perturbvi.cli import main
+
+    with pytest.raises(SystemExit) as error:
+        main(["analyze", "--help"])
+
+    assert error.value.code == 0
+    assert "--verbose" not in capsys.readouterr().out
+
+
 def test_fit_categorical_covariates_require_covariates():
     from perturbvi.cli import main
 
     with pytest.raises(SystemExit):
         main([
             "fit", "input.h5ad", "--output", "out", "--z-dim", "2", "--l-dim", "5",
-            "--tau", "50", "--guide-key", "x", "--categorical-covariates", "batch",
+            "--tau", "50", "--perturbation-column", "x", "--categorical-covariates", "batch",
         ])
 
 
@@ -96,7 +151,7 @@ def test_fit_smoke_h5ad(h5ad_path, tmp_path):
         "--z-dim", "2",
         "--l-dim", "5",
         "--tau", "50",
-        "--guide-key", "perturbation",
+        "--perturbation-column", "perturbation",
         "--control-label", "non-targeting",
         "--max-iter", "3",
         "--seed", "0",
@@ -107,12 +162,19 @@ def test_fit_smoke_h5ad(h5ad_path, tmp_path):
     assert (out / "params_file.pkl").exists()
     assert (out / "run_config.json").exists()
     assert (out / "input_summary.json").exists()
+    assert not (out / "gene_names.txt").exists()
+    assert not (out / "perturbation_names.txt").exists()
 
     config = json.loads((out / "run_config.json").read_text())
     assert config["z_dim"] == 2
     assert config["seed"] == 0
-    assert config["preprocessing_steps"] == ["standardize"]
-    assert config["preprocessing_order"] == "standardize"
+    assert config["preprocessing_steps"] == ["center", "scale"]
+    assert config["preprocessing_order"] == "center_then_scale"
+    assert config["perturbation_column"] == "perturbation"
+    assert "guide_key" not in config
+    summary = json.loads((out / "input_summary.json").read_text())
+    assert summary["gene_names"] == [f"gene_{index}" for index in range(8)]
+    assert set(summary["perturbation_names"]) == {"geneA", "geneB"}
 
 
 def test_fit_smoke_with_covariates(h5ad_path, tmp_path):
@@ -125,7 +187,8 @@ def test_fit_smoke_with_covariates(h5ad_path, tmp_path):
         "--z-dim", "2",
         "--l-dim", "5",
         "--tau", "50",
-        "--guide-key", "perturbation",
+        "--perturbation-column", "perturbation",
+        "--control-label", "non-targeting",
         "--covariates", "batch",
         "--categorical-covariates", "batch",
         "--max-iter", "3",
@@ -133,8 +196,8 @@ def test_fit_smoke_with_covariates(h5ad_path, tmp_path):
     config = json.loads((out / "run_config.json").read_text())
     assert config["covariates"] == ["batch"]
     assert config["categorical_covariates"] == ["batch"]
-    assert config["preprocessing_steps"] == ["residualize", "standardize"]
-    assert config["preprocessing_order"] == "residualize_then_standardize"
+    assert config["preprocessing_steps"] == ["residualize", "center", "scale"]
+    assert config["preprocessing_order"] == "residualize_then_center_then_scale"
     summary = json.loads((out / "input_summary.json").read_text())
     assert summary["source"]["residualized"] is True
     assert summary["source"]["residualized_covariate_names"] == ["batch"]
@@ -148,12 +211,13 @@ def test_analyze_smoke_without_and_with_lfsr(h5ad_path, tmp_path):
         "fit", str(h5ad_path),
         "--output", str(fit_out),
         "--z-dim", "2", "--l-dim", "5", "--tau", "50",
-        "--guide-key", "perturbation",
+        "--perturbation-column", "perturbation",
+        "--control-label", "non-targeting",
         "--max-iter", "3",
     ])
 
-    analyze_out = tmp_path / "analysis"
-    main(["analyze", str(fit_out), "--output", str(analyze_out)])
+    analyze_out = fit_out
+    main(["analyze", str(fit_out)])
 
     csvs = list(analyze_out.glob("*.csv"))
     assert len(csvs) > 0
@@ -163,15 +227,29 @@ def test_analyze_smoke_without_and_with_lfsr(h5ad_path, tmp_path):
     pip_table = pd.read_csv(analyze_out / "pip.csv", index_col=0)
     assert list(pip_table.index) == [f"gene_{index}" for index in range(8)]
 
-    lfsr_out = tmp_path / "analysis_lfsr"
+    pd.DataFrame(
+        2.0,
+        index=[f"gene_{index}" for index in range(8)],
+        columns=["geneA", "geneB", "non-targeting"],
+    ).to_csv(fit_out / "lfsr.csv")
     main([
         "analyze", str(fit_out),
-        "--output", str(lfsr_out),
         "--compute-lfsr",
         "--lfsr-iters", "50",
     ])
 
-    assert (lfsr_out / "lfsr.csv").exists()
+    assert (fit_out / "lfsr.csv").exists()
+    lfsr = pd.read_csv(fit_out / "lfsr.csv", index_col=0)
+    assert (lfsr.to_numpy() <= 1.0).all()
+
+
+def test_analyze_rejects_separate_output_directory(tmp_path):
+    from perturbvi.cli import main
+
+    with pytest.raises(SystemExit) as error:
+        main(["analyze", str(tmp_path), "--output", str(tmp_path / "analysis")])
+
+    assert error.value.code == 2
 
 
 def test_fit_smoke_10x_h5(tmp_path):
@@ -190,9 +268,9 @@ def test_fit_smoke_10x_h5(tmp_path):
             str(input_path),
             "--format",
             "10x-h5",
-            "--metadata",
+            "--cell-metadata",
             str(metadata_path),
-            "--guide-key",
+            "--perturbation-column",
             "target",
             "--control-label",
             "control",
@@ -210,8 +288,11 @@ def test_fit_smoke_10x_h5(tmp_path):
     )
 
     assert (output / "params_file.pkl").is_file()
-    assert (output / "gene_names.txt").read_text().splitlines() == ["gene_1", "gene_2", "gene_3"]
-    assert (output / "perturbation_names.txt").read_text().splitlines() == ["target_a", "target_b"]
+    summary = json.loads((output / "input_summary.json").read_text())
+    assert summary["gene_names"] == ["gene_1", "gene_2", "gene_3"]
+    assert summary["perturbation_names"] == ["target_a", "target_b"]
+    assert not (output / "gene_names.txt").exists()
+    assert not (output / "perturbation_names.txt").exists()
 
 
 def test_fit_smoke_csv(tmp_path):

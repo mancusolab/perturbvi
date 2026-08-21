@@ -13,11 +13,6 @@ from .guide import GuideModel
 from .utils import kl_discrete, logdet
 
 
-class FactorParams(NamedTuple):
-    mean_z: Array
-    covar_z: Array
-
-
 class FactorMoments(NamedTuple):
     mean_z: Array
     mean_zz: Array

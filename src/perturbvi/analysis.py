@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
 import numbers
 
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+
+
+if TYPE_CHECKING:
+    from .infer import InferResults
 
 
 def _validate_threshold(value: float, name: str) -> None:
@@ -77,6 +82,17 @@ def _attach_lfsr(
     expected = (len(gene_names), len(perturbation_names))
     if lfsr_df.shape != expected:
         raise ValueError(f"LFSR table has shape {lfsr_df.shape}; expected {expected}")
+
+    observed_genes = [str(name) for name in lfsr_df.index]
+    expected_genes = [str(name) for name in gene_names]
+    if observed_genes != expected_genes:
+        raise ValueError("LFSR gene labels do not match the current fit")
+
+    observed_perturbations = [str(name) for name in lfsr_df.columns]
+    expected_perturbations = [str(name) for name in perturbation_names]
+    if observed_perturbations != expected_perturbations:
+        raise ValueError("LFSR perturbation labels do not match the current fit")
+
     lfsr_df = pd.DataFrame(lfsr_df.to_numpy(), index=gene_names, columns=perturbation_names)
     rows = []
     for perturbation in lfsr_df.columns:
@@ -110,8 +126,8 @@ def _analyze_result(
         results: An :class:`InferResults` returned by ``infer`` or ``fit_screen``.
         gene_names: Optional labels for expression features.
         perturbation_names: Optional labels for guide features.
-        pip_threshold: Inclusive threshold used by ``pip_significant``.
-        lfsr_threshold: Inclusive threshold used by ``lfsr_significant``.
+        pip_threshold: Inclusive lower bound used by ``pip_significant``.
+        lfsr_threshold: Inclusive upper bound used by ``lfsr_significant``.
         compute_lfsr: Explicitly run the expensive Monte Carlo LFSR step.
         lfsr_iters: Positive number of Monte Carlo iterations.
         seed: Integer random seed passed to LFSR computation.
@@ -178,11 +194,24 @@ def _analyze_result(
     return tables
 
 
-def _read_saved_names(path: Path, filename: str) -> Optional[list[str]]:
-    names_path = path / filename
-    if not names_path.is_file():
-        return None
-    return [line.rstrip("\n\r") for line in names_path.read_text(encoding="utf-8").splitlines()]
+def _read_saved_names(path: Path) -> tuple[Optional[list[str]], Optional[list[str]]]:
+    summary_path = path / "input_summary.json"
+    if not summary_path.is_file():
+        return None, None
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not read name metadata from {summary_path}") from exc
+    if not isinstance(summary, dict):
+        raise ValueError(f"Name metadata in {summary_path} must be a JSON object")
+
+    values = []
+    for key in ("gene_names", "perturbation_names"):
+        names = summary.get(key)
+        if names is not None and not isinstance(names, list):
+            raise ValueError(f"{key} in {summary_path} must be a list or null")
+        values.append(names)
+    return values[0], values[1]
 
 
 def _analyze_saved_result(
@@ -194,17 +223,19 @@ def _analyze_saved_result(
 ) -> dict:
     """Load saved results and delegate to the in-memory analysis core.
 
-    Saved gene and perturbation names are used when explicit names are omitted.
+    CLI name metadata is used when explicit names are omitted.
     A pre-existing root ``lfsr.csv`` is reused without recomputation; a new LFSR
     is calculated only when ``compute_lfsr=True`` is forwarded in ``kwargs``.
     """
     from .io import load_results
 
     result_path = Path(path)
-    if gene_names is None:
-        gene_names = _read_saved_names(result_path, "gene_names.txt")
-    if perturbation_names is None:
-        perturbation_names = _read_saved_names(result_path, "perturbation_names.txt")
+    if gene_names is None or perturbation_names is None:
+        saved_genes, saved_perturbations = _read_saved_names(result_path)
+        if gene_names is None:
+            gene_names = saved_genes
+        if perturbation_names is None:
+            perturbation_names = saved_perturbations
     tables = _analyze_result(
         load_results(str(result_path)),
         gene_names=gene_names,
@@ -227,7 +258,7 @@ def _analyze_saved_result(
 
 
 def analyze(
-    results_or_path,
+    results_or_path: InferResults | str | Path,
     *,
     gene_names: Optional[Sequence[str]] = None,
     perturbation_names: Optional[Sequence[str]] = None,
@@ -239,8 +270,23 @@ def analyze(
 ) -> dict:
     """Analyze an in-memory fit or a saved result directory.
 
-    A path automatically loads saved names and an existing root ``lfsr.csv``.
-    An :class:`InferResults` is analyzed without I/O.
+    A CLI result path loads names from ``input_summary.json`` when present and
+    reuses an existing root ``lfsr.csv``. An :class:`InferResults` is analyzed
+    without I/O.
+
+    Args:
+        results_or_path: Fitted results or a directory written by
+            :func:`save_results`.
+        gene_names: Optional expression-feature labels overriding saved names.
+        perturbation_names: Optional perturbation labels overriding saved names.
+        pip_threshold: Inclusive lower PIP cutoff.
+        lfsr_threshold: Inclusive upper LFSR cutoff.
+        compute_lfsr: Compute LFSR instead of reusing a saved table.
+        lfsr_iters: Positive number of Monte Carlo iterations for LFSR.
+        seed: Random seed for LFSR.
+
+    Returns:
+        Labeled PIP, PVE, perturbation-effect, and optional LFSR DataFrames.
     """
     if isinstance(results_or_path, (str, Path)):
         return _analyze_saved_result(

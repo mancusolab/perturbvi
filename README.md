@@ -13,198 +13,40 @@ single-cell perturbation screens.
 uv pip install perturbvi
 ```
 
-## Before you start
+## Quick start
 
-PerturbVI uses two matrices containing the same cells in the same order:
-
-- `X` contains expression values, with genes in columns.
-- `G` records the perturbation design, with perturbations in columns. Controls
-  are all-zero rows; combination perturbations have more than one active
-  column.
-
-For H5AD data, `load_screen` can construct `G` from a perturbation label in
-`obs` or read a prepared matrix from `obsm`. For 10x H5 or MEX data, provide a
-barcode-indexed metadata table containing the prepared assignments. Raw guide
-counts must be converted to assignments before fitting. Covariates are
-optional and are used only when residualization is requested.
-
-## CLI
-
-### H5AD
+Fit a screen:
 
 ```bash
 perturbvi fit screen.h5ad \
-  --guide-key perturbation \
+  --perturbation-column perturbation \
   --control-label control \
-  --covariates batch log_total_counts percent_mito \
-  --categorical-covariates batch \
   --output results \
   --z-dim 12 --l-dim 400 --tau 50
 ```
 
-`--guide-key` names the observation column containing prepared perturbation
-labels. Use `--guide-obsm guide_matrix` when AnnData already contains a named
-binary or multi-hot `G` matrix.
-
-### Current 10x H5 or MEX
+Analyze the saved fit:
 
 ```bash
-perturbvi fit filtered_feature_bc_matrix.h5 \
-  --format 10x-h5 \
-  --metadata cell_metadata.tsv \
-  --guide-key perturbation \
-  --control-label control \
-  --covariates batch log_total_counts percent_mito \
-  --categorical-covariates batch \
-  --output results \
-  --z-dim 12 --l-dim 400 --tau 50
+perturbvi analyze results
 ```
 
-The metadata index must match the 10x barcodes and contain prepared
-perturbation assignments, such as Cell Ranger protospacer calls. PerturbVI
-selects gene-expression features but does not threshold raw guide features.
-Use `--format 10x-mex` for a current Cell Ranger MEX directory.
+## Cookbook
 
-### Analyze
+- [Shared Python workflow](examples/cookbook.md#shared-function)
+- [Preparing raw expression](examples/cookbook.md#preparing-raw-expression)
+- [LUHMES CSV fit and analysis](examples/cookbook.md#luhmes-csv-fit-and-analysis)
+- [Adamson H5AD and CSV](examples/cookbook.md#adamson-et-al-2016-perturb-seq)
+- [Datlinger CROP-seq](examples/cookbook.md#datlinger-et-al-2017-crop-seq)
+- [Norman CRISPRa with combination perturbations](examples/cookbook.md#norman-et-al-2019-crispra)
+- [Srivatsan sci-Plex](examples/cookbook.md#srivatsan-et-al-2020-sci-plex-2)
+- [10x A375 H5](examples/cookbook.md#10x-genomics-a375-crispr)
+- [10x A549 MEX](examples/cookbook.md#10x-genomics-a549-crispr)
 
-```bash
-perturbvi analyze results --output results/analysis
-```
+## Reference
 
-### LUHMES CSV fit and analysis
-
-This CRISPRi screen targeted 14 autism- and neurodevelopmental disease genes
-with 47 sgRNAs in human LUHMES neuronal precursor cells. Cells were transduced
-at low multiplicity, differentiated for eight days, and profiled by CROP-seq
-and 10x Chromium to measure how each knockdown altered neuronal
-differentiation. The study is available as
-[GSE142078](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE142078) and is
-described by [Lalli et al.](https://pubmed.ncbi.nlm.nih.gov/32887689/).
-
-```bash
-perturbvi fit luhmes_exp.csv \
-  --guide-matrix luhmes_G.csv \
-  --control-label Nontargeting \
-  --z-dim 12 \
-  --l-dim 400 \
-  --tau 800 \
-  --output results \
-  --verbose
-
-perturbvi analyze results \
-  --gene-names luhmes_gene_symbol.csv \
-  --pip-threshold 0.9 \
-  --lfsr-threshold 0.05 \
-  --compute-lfsr \
-  --verbose
-```
-
-Fit files, including `params_file.pkl`, are written to `results`. Analysis
-tables are written to `results/analysis`. The guide columns are saved during
-fitting, so the analysis command does not need to read `luhmes_G.csv` again.
-
-```python
-from pathlib import Path
-
-import pandas as pd
-
-analysis = Path("results/analysis")
-
-pip_summary = pd.read_csv(analysis / "pip_summary.csv", index_col=0)
-print(pip_summary.set_index("factor")["n_pip_significant"])
-
-lfsr_hits = pd.read_csv(analysis / "lfsr_significant.csv", index_col=0)
-perturbations = pd.read_csv(analysis / "beta.csv", index_col=0).index
-print(
-    lfsr_hits.groupby("perturbation")
-    .size()
-    .reindex(perturbations, fill_value=0)
-)
-```
-
-When covariates and `--standardize` are both requested, PerturbVI residualizes
-expression first and standardizes the residuals. Skip residualization when the
-input expression is already residualized.
-
-## Python
-
-```python
-from perturbvi import analyze, fit_screen, load_screen, residualize_screen, save_results
-
-screen = load_screen(
-    "screen.h5ad",
-    guide_key="perturbation",
-    control_label="control",
-    covariates=["batch", "log_total_counts", "percent_mito"],
-)
-screen = residualize_screen(screen, categorical_covariates=["batch"])
-result = fit_screen(screen, z_dim=12, l_dim=400, tau=50, seed=1)
-
-save_results(
-    result,
-    "results",
-    gene_names=screen.gene_names,
-    perturbation_names=screen.perturbation_names,
-)
-tables = analyze(
-    result,
-    gene_names=screen.gene_names,
-    perturbation_names=screen.perturbation_names,
-)
-```
-
-`load_screen` also accepts an AnnData object.
-
-## Formats
-
-| Input | CLI | Python |
-|---|---:|---:|
-| H5AD | yes | yes |
-| AnnData object | no | yes |
-| CSV/TSV | yes | yes |
-| Current 10x H5/MEX | yes | yes |
-
-CSV and TSV are intended for small or medium dense matrices. H5AD and 10x
-loading preserves sparse expression.
-
-Zarr is not a first-class input format. Save an AnnData object as H5AD before
-loading it with PerturbVI.
-
-## Outputs
-
-Every saved fit contains `W.txt`, `pip.txt`, `pve.txt`, and
-`params_file.pkl`. Named fits also contain `gene_names.txt` and
-`perturbation_names.txt`; CLI fits add `run_config.json` and
-`input_summary.json`.
-
-By default, `perturbvi analyze` writes `pip.csv`, `pve.csv`, `beta.csv`,
-`p_hat.csv`, `overall_effect.csv`, `pip_significant.csv`, and
-`pip_summary.csv`. With `--compute-lfsr`, it also writes `lfsr.csv` and
-`lfsr_significant.csv`.
-
-See the [output reference](docs/api.md#saved-files) for details.
-
-## Direct array use
-
-Use `infer` when `X` and `G` are already aligned and prepared. Controls are
-all-zero rows in `G`; do not add a control column.
-
-```python
-from perturbvi import infer
-
-result = infer(
-    X,
-    z_dim=12,
-    l_dim=400,
-    G=G,
-    tau=50,
-    seed=1,
-)
-```
-
-See the [cookbook](examples/cookbook.md) and the
-[API documentation](https://mancusolab.github.io/perturbvi/) for additional
-options.
+See the [API reference](https://mancusolab.github.io/perturbvi/api/) for
+functions, command options, and saved files.
 
 ## Support
 

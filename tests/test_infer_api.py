@@ -7,7 +7,7 @@ from scipy import sparse
 
 from jax.experimental import sparse as jax_sparse
 
-from perturbvi import infer
+from perturbvi import analyze, infer
 from perturbvi.loaders import _to_internal_matrix
 
 
@@ -31,6 +31,17 @@ def test_infer_low_level_positional_contract_is_stable():
     assert parameters[:4] == ["X", "z_dim", "l_dim", "G"]
 
 
+def test_elbo_results_has_one_canonical_definition():
+    from perturbvi.common import ELBOResults as CommonELBOResults
+    from perturbvi.infer import ELBOResults as InferELBOResults
+
+    assert InferELBOResults is CommonELBOResults
+
+
+def test_infer_uses_shared_p_prior_default():
+    assert inspect.signature(infer).parameters["p_prior"].default == 0.1
+
+
 def test_infer_rejects_zero_variance_before_standardizing():
     X, G = _inputs()
     X[:, 0] = 1.0
@@ -46,6 +57,27 @@ def test_infer_rejects_zero_variance_before_standardizing():
             max_iter=1,
             verbose=False,
         )
+
+
+@pytest.mark.parametrize("standardize", [False, True])
+def test_infer_always_centers_and_optionally_scales_expression(standardize):
+    X, G = _inputs()
+    centered = X - X.mean(axis=0)
+    expected_x_ssq = X.size if standardize else np.sum(centered**2)
+
+    results = infer(
+        X,
+        1,
+        1,
+        G,
+        tau=2.0,
+        standardize=standardize,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+
+    np.testing.assert_allclose(results.params.x_ssq, expected_x_ssq, rtol=1e-5)
 
 
 def test_infer_sparse_expression_and_guides_remain_supported():
@@ -106,7 +138,7 @@ def test_infer_annotation_prior_and_dense_guide_modes_remain_supported():
         A=A,
         tau=2.0,
         init="random",
-        max_iter=1,
+        max_iter=3,
         verbose=False,
     )
     dense_guides = infer(
@@ -122,6 +154,87 @@ def test_infer_annotation_prior_and_dense_guide_modes_remain_supported():
     )
     assert np.isfinite(np.asarray(annotated.pip)).all()
     assert np.isfinite(np.asarray(dense_guides.params.mean_beta)).all()
+
+
+def test_annotation_optimizer_state_is_initialized_once_and_reused(monkeypatch):
+    import importlib
+
+    from perturbvi.common import ELBOResults
+
+    infer_module = importlib.import_module("perturbvi.infer")
+    init_calls = []
+    observed_states = []
+
+    class FakeAnnotationPrior:
+        def __init__(self, A, search):
+            self.A = A
+
+        @property
+        def shape(self):
+            return self.A.shape
+
+        def init_state(self, params):
+            init_calls.append(True)
+            return params._replace(ann_state=0)
+
+    def fake_inner_loop(X, guide, factors, loadings, annotation, params):
+        observed_states.append(params.ann_state)
+        score = float(len(observed_states))
+        elbo = ELBOResults(score, score, 0.0, 0.0, 0.0)
+        return elbo, params._replace(ann_state=params.ann_state + 1)
+
+    monkeypatch.setattr(infer_module, "AnnotationPriorModel", FakeAnnotationPrior)
+    monkeypatch.setattr(infer_module, "_inner_loop", fake_inner_loop)
+
+    X, G = _inputs()
+    A = np.ones((X.shape[1], 1))
+    infer(X, 1, 1, G, A=A, tau=2.0, init="random", max_iter=3, verbose=False)
+
+    assert len(init_calls) == 1
+    assert observed_states == [0, 1, 2]
+
+
+@pytest.mark.parametrize("p_prior", [None, 0.0])
+def test_dense_guide_mode_preserves_deterministic_beta_effects(p_prior):
+    X, G = _inputs()
+    results = infer(
+        X,
+        1,
+        1,
+        G,
+        p_prior=p_prior,
+        tau=2.0,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+
+    assert results.params.p is None
+    np.testing.assert_array_equal(results.params.p_hat, np.ones((1, G.shape[1])))
+    np.testing.assert_array_equal(results.params.var_beta, np.zeros((G.shape[1], 1)))
+
+    tables = analyze(results)
+    np.testing.assert_allclose(tables["beta"].to_numpy(), results.params.mean_beta)
+    np.testing.assert_allclose(
+        tables["overall_effect"].to_numpy(),
+        (results.params.mean_beta @ results.params.W).T,
+    )
+
+
+def test_infer_preserves_factor_covariance_shape():
+    X, G = _inputs()
+    results = infer(
+        X,
+        2,
+        2,
+        G,
+        tau=2.0,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+
+    assert results.params.var_z.shape == (2, 2)
 
 
 def test_infer_does_not_mutate_numpy_inputs_when_standardizing():

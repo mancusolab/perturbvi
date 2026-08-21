@@ -2,7 +2,7 @@
 
 The public API covers loading a screen, optional residualization, model
 fitting, saving, and analysis. Use the array interface when `X` and `G` are
-already prepared and aligned.
+already constructed with matching rows.
 
 ## Load a screen
 
@@ -10,14 +10,29 @@ already prepared and aligned.
 
 ::: perturbvi.load_screen
 
+The CLI uses one assignment option for each input layout:
+
+| Input layout | Perturbation assignments |
+|---|---|
+| H5AD labels in `obs` | `--perturbation-column` and `--control-label` |
+| H5AD matrix in `obsm` | `--guide-matrix-key` |
+| 10x H5 or MEX | `--cell-metadata`, `--perturbation-column`, and `--control-label` |
+| CSV or TSV expression | `--guide-matrix` |
+
+`--expression-layer` selects `X` or a layer from H5AD. `--header` and
+`--index-col` apply only to CSV and TSV files. Their defaults expect gene names
+in the first row and cell IDs in the first column; use `none` only when either
+is absent. Run `perturbvi fit --help` for complete input recipes.
+
 ## Residualize expression
 
 ::: perturbvi.residualize_screen
 
-Residualization is optional. If residualization and standardization are both
-requested, PerturbVI residualizes expression first and standardizes the
-residuals. CLI fits record the applied steps in `run_config.json` and describe
-the fitted input in `input_summary.json`.
+Residualization is optional. PerturbVI centers every expression feature before
+fitting. With `standardize=True`, it also scales each centered feature to unit
+population variance. Residualization runs before centering and scaling.
+`perturbvi fit` records these steps in `run_config.json` and describes the
+fitted input in `input_summary.json`.
 
 ## Fit the model
 
@@ -42,12 +57,16 @@ the fitted input in `input_summary.json`.
 | `pve.txt` | Per-factor proportion of variance explained |
 | `params_file.pkl` | Fitted model parameters |
 
-When names are supplied, `gene_names.txt` and `perturbation_names.txt` are
-written beside the model. CLI fits also write `run_config.json` and
-`input_summary.json`.
+`perturbvi fit` writes `run_config.json` and `input_summary.json` beside the
+model. `input_summary.json` retains gene and perturbation names for later CLI
+analysis; separate name text files are not created.
 
-`perturbvi analyze` writes these tables to `results/analysis` unless another
-output directory is supplied:
+Gene names label columns of `X`, and perturbation names label columns of `G`.
+Names passed to `analyze()` or supplied to `perturbvi analyze` label the output
+tables; they must have the correct length and order and do not alter fitted
+values. CLI override files contain one name per row.
+
+`perturbvi analyze` writes these tables to the fit directory:
 
 | File | Contents |
 |---|---|
@@ -56,11 +75,13 @@ output directory is supplied:
 | `beta.csv` | Sparse perturbation-by-factor effects |
 | `p_hat.csv` | Perturbation-factor posterior probabilities |
 | `overall_effect.csv` | Gene-by-perturbation effects |
-| `pip_significant.csv` | Genes meeting the PIP threshold |
+| `pip_significant.csv` | Genes with PIP at or above the cutoff |
 | `pip_summary.csv` | Per-factor PIP and PVE summary |
 
-With `--compute-lfsr`, analysis also writes `lfsr.csv` and
-`lfsr_significant.csv`. LFSR is not computed by default.
+If `lfsr.csv` already exists, `perturbvi analyze` reads it without recomputing
+LFSR after confirming that its gene and perturbation labels match the fit.
+`--compute-lfsr` recomputes LFSR and replaces `lfsr.csv` and
+`lfsr_significant.csv`. LFSR values at or below the cutoff are significant.
 
 ## Array interface
 
