@@ -157,7 +157,40 @@ options.
 
 ## Support
 
-Report bugs or feature requests in the
-[issue tracker](https://github.com/mancusolab/perturbvi/issues).
+Please report bugs or feature requests in the
+[issue tracker](https://github.com/mancusolab/perturbvi/issues). For questions
+or comments, contact Abdullah Al Nahid (<alnahid@usc.edu>) or Nicholas Mancuso
+(<nmancuso@usc.edu>).
 
-PerturbVI is distributed under the [MIT license](https://spdx.org/licenses/MIT.html).
+## Other Software
+
+Other software developed by the [Mancuso Lab](https://www.mancusolab.com/):
+
+- [SuShiE](https://github.com/mancusolab/sushie): a Bayesian fine-mapping
+  framework for molecular QTL data across multiple ancestries.
+- [jaxQTL](https://github.com/mancusolab/jaxqtl): scalable, count-based
+  large-scale eQTL mapping.
+- [MA-FOCUS](https://github.com/mancusolab/ma-focus): a Bayesian fine-mapping
+  framework using [TWAS](https://www.nature.com/articles/ng.3506) statistics
+  across multiple ancestries to identify causal genes for complex traits.
+- [SuSiE-PCA](https://github.com/mancusolab/susiepca): scalable Bayesian
+  variable selection for sparse principal component analysis.
+- [twas_sim](https://github.com/mancusolab/twas_sim): simulation of
+  [TWAS](https://www.nature.com/articles/ng.3506) statistics.
+- [traceax](https://github.com/mancusolab/traceax): stochastic trace
+  estimation for linear operators.
+- [FactorGo](https://github.com/mancusolab/factorgo): scalable variational
+  factor analysis for learning pleiotropic factors from GWAS summary
+  statistics.
+- [HAMSTA](https://github.com/tszfungc/hamsta): estimation of heritability
+  explained by local ancestry data from admixture mapping summary statistics.
+
+---
+
+PerturbVI is distributed under the terms of the
+[MIT license](https://spdx.org/licenses/MIT.html).
+
+---
+
+This project has been set up using Hatch. See the
+[Hatch documentation](https://hatch.pypa.io/) for usage information.
