@@ -71,6 +71,57 @@ Use `--format 10x-mex` for a current Cell Ranger MEX directory.
 perturbvi analyze results --output results/analysis
 ```
 
+### LUHMES CSV fit and analysis
+
+This CRISPRi screen targeted 14 autism- and neurodevelopmental disease genes
+with 47 sgRNAs in human LUHMES neuronal precursor cells. Cells were transduced
+at low multiplicity, differentiated for eight days, and profiled by CROP-seq
+and 10x Chromium to measure how each knockdown altered neuronal
+differentiation. The study is available as
+[GSE142078](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE142078) and is
+described by [Lalli et al.](https://pubmed.ncbi.nlm.nih.gov/32887689/).
+
+```bash
+perturbvi fit luhmes_exp.csv \
+  --guide-matrix luhmes_G.csv \
+  --control-label Nontargeting \
+  --z-dim 12 \
+  --l-dim 400 \
+  --tau 800 \
+  --output results \
+  --verbose
+
+perturbvi analyze results \
+  --gene-names luhmes_gene_symbol.csv \
+  --pip-threshold 0.9 \
+  --lfsr-threshold 0.05 \
+  --compute-lfsr \
+  --verbose
+```
+
+Fit files, including `params_file.pkl`, are written to `results`. Analysis
+tables are written to `results/analysis`. The guide columns are saved during
+fitting, so the analysis command does not need to read `luhmes_G.csv` again.
+
+```python
+from pathlib import Path
+
+import pandas as pd
+
+analysis = Path("results/analysis")
+
+pip_summary = pd.read_csv(analysis / "pip_summary.csv", index_col=0)
+print(pip_summary.set_index("factor")["n_pip_significant"])
+
+lfsr_hits = pd.read_csv(analysis / "lfsr_significant.csv", index_col=0)
+perturbations = pd.read_csv(analysis / "beta.csv", index_col=0).index
+print(
+    lfsr_hits.groupby("perturbation")
+    .size()
+    .reindex(perturbations, fill_value=0)
+)
+```
+
 When covariates and `--standardize` are both requested, PerturbVI residualizes
 expression first and standardizes the residuals. Skip residualization when the
 input expression is already residualized.

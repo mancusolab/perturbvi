@@ -140,6 +140,68 @@ DATA = Path("/path/to/your/data")
 OUTPUT = Path("perturbvi_results")
 ```
 
+## LUHMES CSV fit and analysis
+
+This human neuronal differentiation screen used dCas9-based transcriptional
+repression to study autism and neurodevelopmental disease genes. LUHMES cells
+received a library of 47 sgRNAs targeting 14 genes or serving as non-targeting
+controls. Low-multiplicity transduction enriched for one perturbation per cell;
+the cells were then differentiated for eight days and profiled with 10x
+Chromium. CROP-seq recovered the sgRNA assignments from polyadenylated RNA.
+
+The data are available from GEO as
+[GSE142078](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE142078). The
+experiment is described by [Lalli et al., Genome Research
+2020](https://pubmed.ncbi.nlm.nih.gov/32887689/).
+
+This workflow uses a cell-by-gene expression table, a cell-by-guide table, and
+a one-column gene-symbol file. `Nontargeting` is the control column in
+`luhmes_G.csv`; PerturbVI removes that column from `G` and treats its cells as
+controls. The expression and guide tables must use the same unique cell names.
+
+```bash
+perturbvi fit luhmes_exp.csv \
+  --guide-matrix luhmes_G.csv \
+  --control-label Nontargeting \
+  --z-dim 12 \
+  --l-dim 400 \
+  --tau 800 \
+  --output results \
+  --verbose
+
+perturbvi analyze results \
+  --gene-names luhmes_gene_symbol.csv \
+  --pip-threshold 0.9 \
+  --lfsr-threshold 0.05 \
+  --compute-lfsr \
+  --verbose
+```
+
+The fit is saved under `results`, including `params_file.pkl`. The analysis
+tables are saved under `results/analysis`.
+
+```python
+from pathlib import Path
+
+import pandas as pd
+
+analysis = Path("results/analysis")
+
+pip_summary = pd.read_csv(analysis / "pip_summary.csv", index_col=0)
+num_deg_per_w = pip_summary.set_index("factor")["n_pip_significant"]
+
+lfsr_hits = pd.read_csv(analysis / "lfsr_significant.csv", index_col=0)
+perturbations = pd.read_csv(analysis / "beta.csv", index_col=0).index
+num_deg_per_perturbed_gene = (
+    lfsr_hits.groupby("perturbation")
+    .size()
+    .reindex(perturbations, fill_value=0)
+)
+
+print(num_deg_per_w)
+print(num_deg_per_perturbed_gene)
+```
+
 ## scPerturb datasets
 
 [scPerturb](https://www.sanderlab.org/scPerturb/) distributes harmonized H5AD
