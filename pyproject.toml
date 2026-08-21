@@ -11,8 +11,8 @@ requires-python = ">=3.9"
 license = "MIT"
 keywords = []
 authors = [
-  { name = "Dong Yuan", email = "dongyuan@usc.edu" },
   { name = "Abdullah Al-Nahid", email = "alnahid@usc.edu" },
+  { name = "Dong Yuan", email = "dongyuan@usc.edu" },
   { name = "Nicholas Mancuso", email = "nmancuso@usc.edu" },
 ]
 classifiers = [
@@ -36,6 +36,7 @@ dependencies = [
     "plum-dispatch",
     "pandas",
     "numpy",
+    "scipy",
     "scanpy",
     "matplotlib",
     "seaborn",

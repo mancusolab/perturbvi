@@ -1,12 +1,9 @@
 # pattern: Functional Core
 
 import logging
-import os
-import pickle
 
 from datetime import datetime
 from functools import partial
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -18,6 +15,7 @@ import lineax as lx
 from jax import jit, lax, numpy as jnp, random as rdm
 from jaxtyping import Array
 
+from .common import ModelParams
 from .log import get_logger
 
 
@@ -208,7 +206,7 @@ def _compute_lfsr_step(key, params, iters):
     return total_pos_zero, total_neg_zero
 
 
-def compute_lfsr(key, params, iters=2000):
+def compute_lfsr(key: Array, params: ModelParams, iters: int = 2000) -> Array:
     """Compute the LFSR (Local False Sign Rate) using the given parameters.
 
     Arguments:
@@ -262,7 +260,7 @@ def pip_analysis(pip: jnp.ndarray, rho=0.9, rho_prime=0.05):
     z_dim, p_dim = pip.shape
     results = []
 
-    log.info(f"Of {p_dim} features from the data, SuSiE PCA identifies:")
+    log.info(f"Of {p_dim} features from the data, PerturbVI identifies:")
     for k in range(z_dim):
         num_signal = jnp.where(pip[k, :] >= rho)[0].shape[0]
         num_zero = jnp.where(pip[k, :] < rho_prime)[0].shape[0]
@@ -291,136 +289,3 @@ def find_top_genes(df, pip_cutoff=0.9):
         high_values = df[df[column] > pip_cutoff].index.tolist()
         high_value_genes[column] = high_values
     return high_value_genes
-
-
-def analyze_output(
-    dir: str,
-    perturb_genes: Sequence[str],
-    background_genes: Sequence[str],
-):
-    """
-    Produce results from output files.
-
-    Deprecated path: use ``perturbvi.load_results`` and ``perturbvi.analyze`` instead.
-
-    Args:
-        dir: Results directory
-        perturb_genes: List of perturbed gene symbols (e.g. 14 genes)
-        background_genes: List of background gene symbols (e.g. ~6000 genes)
-    """
-
-    perturb_genes = list(perturb_genes)
-    background_genes = list(background_genes)
-
-    params_path = f"{dir}/params_file.pkl"
-    pip_path = f"{dir}/pip.txt"
-    W_path = f"{dir}/W.txt"
-    pip_df_path = f"{dir}/pip.csv"
-    lfsr_path = f"{dir}/lfsr.csv"
-    p_hat_path = f"{dir}/p_hat.csv"
-    beta_path = f"{dir}/beta_target.csv"
-    overall_path = f"{dir}/overall_effect.csv"
-
-    # For Luhmes
-    # guide_path = "luhmes_G.csv"
-    # gene_path = "luhmes_gene_symbol_v2.csv"
-    # G = pd.read_csv(guide_path, index_col=0)
-    # G_reduce = G.drop(columns=["Nontargeting"])
-    # perturbed = G_reduce.columns.to_list()  # 14 genes perturbed
-    # genes = pd.read_csv(gene_path, header=None)[0].to_list()  # 6000 gene symbols (background genes)
-
-    with open(params_path, "rb") as file:
-        params = pickle.load(file)
-
-    pip = np.loadtxt(pip_path)
-    W = pd.DataFrame(np.loadtxt(W_path))
-
-    z_dim, p_dim = params.W.shape
-    g_dim, z_dim = params.mean_beta.shape
-    n_dim, z_dim = params.mean_z.shape
-    log.info(f"Dims: z_dim={z_dim}, p_dim={p_dim}, g_dim={g_dim}, n_dim={n_dim}")
-    column_names_b = [f"b{i}" for i in range(z_dim)]
-    column_names_w = [f"w{i}" for i in range(z_dim)]
-
-    beta_sparse = params.mean_beta * params.p_hat.T
-    overall_effect = beta_sparse @ params.W
-
-    # pip_df = pd.DataFrame(pip.T, columns=column_names_w)
-    pip_df = pd.DataFrame(pip.T, columns=column_names_w, index=background_genes)
-    pip_df.to_csv(pip_df_path)
-
-    analysis = pip_analysis(jnp.asarray(pip).astype(jnp.float32), rho=0.90, rho_prime=0.10)
-
-    for col in pip_df.columns:
-        sig_genes = pip_df.index[pip_df[col] > 0.9].tolist()
-        if not os.path.exists(f"{dir}/pip"):
-            os.makedirs(f"{dir}/pip")
-        np.savetxt(f"{dir}/pip/{col}_sig_genes.txt", sig_genes, fmt="%s")
-        log.info(f"Saved {len(sig_genes)} sig. genes for {col} (PIP > 0.9) in {dir}/pip/{col}_sig_genes.txt")
-    skip_lfsr = os.path.exists(lfsr_path)
-
-    if skip_lfsr:
-        log.info("lfsr.csv exists. skipping lfsr compute...")
-        lfsr_df = pd.read_csv(lfsr_path, index_col=0)
-        lfsr_df.index = pd.Index(background_genes)
-        lfsr_df.columns = perturb_genes
-        lfsr_df.to_csv(lfsr_path)
-    else:
-        lfsr = compute_lfsr(key=rdm.PRNGKey(0), params=params, iters=2000)
-        lfsr.block_until_ready()
-        lfsr_np = np.array(lfsr)
-        # lfsr_df = pd.DataFrame(lfsr_np.T)
-        lfsr_df = pd.DataFrame(lfsr_np.T, index=background_genes, columns=perturb_genes)
-        lfsr_df.to_csv(lfsr_path)
-
-    # number of degs per w from PIP (find top genes with high pip)
-    # top_pip_degs = find_top_genes(pip_df,0.90)
-    # number of degs per w from PIP
-    num_deg_per_w = (pip_df > 0.9).sum(axis=0)
-
-    # number of degs per perturbed gene from LFSR
-    num_deg_per_gene = (lfsr_df < 0.05).sum(axis=0)
-
-    for col in lfsr_df.columns:
-        sig_genes = lfsr_df.index[lfsr_df[col] < 0.05].tolist()
-        if not os.path.exists(f"{dir}/lfsr"):
-            os.makedirs(f"{dir}/lfsr")
-        np.savetxt(f"{dir}/lfsr/{col}_sig_genes.txt", sig_genes, fmt="%s")
-        log.info(f"Saved {len(sig_genes)} sig. genes for {col} (LFSR < 0.05) in {dir}/lfsr")
-
-    # p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b)
-    p_hat_df = pd.DataFrame(params.p_hat.T, columns=column_names_b, index=perturb_genes)
-    p_hat_df.to_csv(p_hat_path)
-
-    # beta_df = pd.DataFrame(beta_sparse, columns=column_names_b)
-    beta_df = pd.DataFrame(beta_sparse, columns=column_names_b, index=perturb_genes)
-    beta_df.to_csv(beta_path)
-
-    # overall_df = pd.DataFrame(overall_effect.T)
-    overall_df = pd.DataFrame(overall_effect.T, columns=perturb_genes, index=background_genes)
-    overall_df.to_csv(overall_path)
-
-    log.info(f"shape of W df {W.shape}")
-    log.info(f"shape of pip df {pip_df.shape}")
-    log.info(f"shape of lfsr df {lfsr_df.shape}")
-    log.info(f"shape of p_hat df {p_hat_df.shape}")
-    log.info(f"shape of beta target df {beta_df.shape}")
-    log.info(f"shape of overall effect df {overall_df.shape}")
-
-    log.info("Done!")
-
-    log.info(f"To check significant DEGs per W, see {dir}/pip")
-    log.info(f"To check significant DEGs per perturbed gene, see {dir}/lfsr")
-
-    return {
-        "params": params,
-        "W_df": W,
-        "pip_df": pip_df,
-        "pip_analysis": analysis,
-        "num_deg_per_perturbed_gene": num_deg_per_gene,
-        "num_deg_per_w": num_deg_per_w,
-        "lfsr_df": lfsr_df,
-        "p_hat_df": p_hat_df,
-        "beta_df": beta_df,
-        "overall_effect_df": overall_df,
-    }

@@ -7,7 +7,7 @@ from jaxtyping import Array, ArrayLike
 from .sparse import CenteredSparseMatrix, SparseMatrix
 
 
-DataMatrix = Array | SparseMatrix | CenteredSparseMatrix
+DataMatrix = Union[Array, SparseMatrix, CenteredSparseMatrix]
 FloatOrArray = Union[float, ArrayLike]
 
 
@@ -40,7 +40,7 @@ class ELBOResults(NamedTuple):
 class ModelParams(NamedTuple):
     """
     Define the class for variational parameters of all the variable we need
-    to infer from the perturbVI.
+    to infer from PerturbVI.
 
     Attributes:
         mean_z: mean parameter for factor Z

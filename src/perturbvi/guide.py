@@ -1,5 +1,6 @@
-# pattern: Functional Core
+from __future__ import annotations
 
+# pattern: Functional Core
 from abc import abstractmethod
 
 from plum import dispatch
@@ -80,7 +81,7 @@ def _update_dense_beta(G: Array, params: ModelParams) -> ModelParams:
     G_op = lx.MatrixLinearOperator(G)
 
     # Use lineax's CG solver
-    solver = lx.NormalCG(rtol=1e-6, atol=1e-6)
+    solver = lx.Normal(lx.CG(rtol=1e-6, atol=1e-6))
     out = _multi_linear_solve(G_op, params.mean_z, solver)
 
     # Updated beta
@@ -92,7 +93,7 @@ def _update_dense_beta(G: Array, params: ModelParams) -> ModelParams:
 @dispatch
 def _update_dense_beta(G: SparseMatrix, params: ModelParams) -> ModelParams:
     # Use lineax's CG solver
-    solver = lx.NormalCG(rtol=1e-6, atol=1e-6)
+    solver = lx.Normal(lx.CG(rtol=1e-6, atol=1e-6))
 
     out = jax.vmap(lambda b: lx.linear_solve(G, b, solver), in_axes=1)(params.mean_z)
 

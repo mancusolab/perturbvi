@@ -1,256 +1,185 @@
-import warnings
-
 import anndata as ad
 import numpy as np
 import pandas as pd
 import pytest
 
+from jax.experimental import sparse as jax_sparse
+
+from perturbvi import load_screen
 from perturbvi.loaders import _load_10x
 
+from .helpers import write_10x_h5, write_10x_mex
 
-def _make_10x_adata(n=30, n_exp=10, n_guide=3, seed=0):
-    """Minimal AnnData with feature_types column, like Cell Ranger output."""
+
+def _make_10x_adata(n=30, n_exp=10, n_assay=3, seed=0):
+    """Minimal current Cell Ranger feature-barcode matrix."""
     rng = np.random.default_rng(seed)
-    n_vars = n_exp + n_guide
+    n_vars = n_exp + n_assay
     X = rng.poisson(3, (n, n_vars)).astype(float)
     var = pd.DataFrame(
-        {"feature_types": ["Gene Expression"] * n_exp + ["CRISPR Guide Capture"] * n_guide},
-        index=[f"gene_{i}" for i in range(n_exp)] + [f"guide_{i}" for i in range(n_guide)],
+        {"feature_types": ["Gene Expression"] * n_exp + ["CRISPR Guide Capture"] * n_assay},
+        index=[f"gene_{i}" for i in range(n_exp)] + [f"assay_{i}" for i in range(n_assay)],
     )
     obs = pd.DataFrame(index=[f"cell_{i}" for i in range(n)])
     return ad.AnnData(X=X, obs=obs, var=var)
 
 
-def test_load_10x_splits_features():
-    adata = _make_10x_adata(n_exp=10, n_guide=3)
+def _write_metadata(path, cells):
+    labels = ["control", "target_a", "target_b"]
+    pd.DataFrame(
+        {
+            "target": [labels[index % len(labels)] for index in range(len(cells))],
+            "batch": [f"b{index % 2}" for index in range(len(cells))],
+        },
+        index=cells,
+    ).to_csv(path)
+    return path
+
+
+def test_load_10x_selects_expression_and_uses_metadata_labels(tmp_path):
+    adata = _make_10x_adata(n_exp=10, n_assay=3)
+    metadata = _write_metadata(tmp_path / "metadata.csv", adata.obs_names)
     screen = _load_10x(
         adata,
         expression_feature_type="Gene Expression",
-        guide_feature_type="CRISPR Guide Capture",
-        guide_threshold=1,
-        multi_guide="allow",
         source_format="10x-h5",
         source_path="fake.h5",
-        covariate_file=None,
-        covariate_keys=None,
+        metadata_path=str(metadata),
+        guide_key="target",
+        control_label="control",
     )
+
     assert screen.X.shape == (30, 10)
-    assert screen.G.shape == (30, 3)
-    assert len(screen.genes) == 10
-    assert len(screen.perturbations) == 3
+    assert screen.G.shape == (30, 2)
+    assert screen.gene_names == [f"gene_{index}" for index in range(10)]
+    assert screen.perturbation_names == ["target_a", "target_b"]
+    assert screen.source["guide_assignment"] == "metadata"
+    assert screen.source["n_total_vars"] == 13
 
 
-def test_load_10x_missing_expression_type():
+def test_load_10x_missing_expression_type(tmp_path):
     adata = _make_10x_adata()
+    metadata = _write_metadata(tmp_path / "metadata.csv", adata.obs_names)
     with pytest.raises(ValueError, match="No features with feature_type='Bad Type'"):
         _load_10x(
             adata,
             expression_feature_type="Bad Type",
-            guide_feature_type="CRISPR Guide Capture",
-            guide_threshold=1,
-            multi_guide="allow",
             source_format="10x-h5",
             source_path="fake.h5",
-            covariate_file=None,
-            covariate_keys=None,
+            metadata_path=str(metadata),
+            guide_key="target",
         )
 
 
-def test_load_10x_missing_guide_type():
-    adata = _make_10x_adata()
-    with pytest.raises(ValueError, match="No features with feature_type='Bad Guide'"):
-        _load_10x(
-            adata,
-            expression_feature_type="Gene Expression",
-            guide_feature_type="Bad Guide",
-            guide_threshold=1,
-            multi_guide="allow",
-            source_format="10x-h5",
-            source_path="fake.h5",
-            covariate_file=None,
-            covariate_keys=None,
-        )
-
-
-def test_load_10x_missing_feature_types_column():
+def test_load_10x_missing_feature_types_column(tmp_path):
     adata = _make_10x_adata()
     adata.var = adata.var.drop(columns=["feature_types"])
+    metadata = _write_metadata(tmp_path / "metadata.csv", adata.obs_names)
     with pytest.raises(ValueError, match="feature_types"):
         _load_10x(
             adata,
             expression_feature_type="Gene Expression",
-            guide_feature_type="CRISPR Guide Capture",
-            guide_threshold=1,
-            multi_guide="allow",
             source_format="10x-h5",
             source_path="fake.h5",
-            covariate_file=None,
-            covariate_keys=None,
+            metadata_path=str(metadata),
+            guide_key="target",
         )
 
 
-def test_load_10x_binarizes_at_threshold():
-    adata = _make_10x_adata(n=10, n_exp=5, n_guide=2)
-    # Set guide counts to known values
-    adata.X[:, 5] = 0   # guide_0 — all zeros
-    adata.X[:, 6] = 3   # guide_1 — all above threshold
-    adata.X[0, 5] = 2   # cell_0 guide_0 = 2 (above threshold 1)
+def test_load_screen_10x_requires_metadata():
+    with pytest.raises(ValueError, match="requires one barcode-indexed metadata_path"):
+        load_screen("fake.h5", format="10x-h5")
+
+
+def test_load_screen_10x_requires_guide_key_with_metadata(tmp_path):
+    metadata = _write_metadata(tmp_path / "metadata.csv", ["cell_0"])
+    with pytest.raises(ValueError, match="guide_key is required"):
+        load_screen("fake.h5", format="10x-h5", metadata_path=str(metadata))
+
+
+@pytest.mark.parametrize("option", [{"layer": "counts"}, {"guide_obsm": "guides"}, {"guide_path": "g.csv"}])
+def test_load_screen_10x_rejects_inapplicable_options(option):
+    with pytest.raises(ValueError, match="not applicable|only applicable"):
+        load_screen("fake.h5", format="10x-h5", **option)
+
+
+def test_load_10x_metadata_supplies_subset_and_covariates(tmp_path):
+    adata = _make_10x_adata(n=8, n_exp=4, n_assay=2)
+    selected = ["cell_6", "cell_2", "cell_4", "cell_0"]
+    metadata_path = tmp_path / "metadata.csv"
+    pd.DataFrame(
+        {
+            "target": ["control", "target_b", "target_a", "target_a"],
+            "batch": ["b2", "b1", "b2", "b1"],
+            "depth": [6.0, 2.0, 4.0, 0.0],
+        },
+        index=selected,
+    ).to_csv(metadata_path)
 
     screen = _load_10x(
         adata,
         expression_feature_type="Gene Expression",
-        guide_feature_type="CRISPR Guide Capture",
-        guide_threshold=1,
-        multi_guide="allow",
         source_format="10x-h5",
         source_path="fake.h5",
-        covariate_file=None,
-        covariate_keys=None,
+        metadata_path=str(metadata_path),
+        guide_key="target",
+        control_label="control",
+        covariates=["batch", "depth"],
     )
-    assert screen.G[0, 0] == 1.0   # cell_0, guide_0 → above threshold
-    assert screen.G[1, 1] == 1.0   # cell_1, guide_1 → above threshold
 
-
-def test_load_10x_multi_guide_warn():
-    adata = _make_10x_adata(n=10, n_exp=5, n_guide=3)
-    # Force cell_0 to have all guides assigned
-    adata.X[0, 5] = 5
-    adata.X[0, 6] = 5
-    adata.X[0, 7] = 5
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        _load_10x(
-            adata,
-            expression_feature_type="Gene Expression",
-            guide_feature_type="CRISPR Guide Capture",
-            guide_threshold=1,
-            multi_guide="warn",
-            source_format="10x-h5",
-            source_path="fake.h5",
-            covariate_file=None,
-            covariate_keys=None,
-        )
-    assert any("more than one guide" in str(w.message) for w in caught)
-
-
-def test_load_10x_multi_guide_error():
-    adata = _make_10x_adata(n=10, n_exp=5, n_guide=3)
-    adata.X[0, 5] = 5
-    adata.X[0, 6] = 5
-    adata.X[0, 7] = 5
-
-    with pytest.raises(ValueError, match="more than one guide"):
-        _load_10x(
-            adata,
-            expression_feature_type="Gene Expression",
-            guide_feature_type="CRISPR Guide Capture",
-            guide_threshold=1,
-            multi_guide="error",
-            source_format="10x-h5",
-            source_path="fake.h5",
-            covariate_file=None,
-            covariate_keys=None,
-        )
-
-
-def test_load_10x_multi_guide_allow():
-    adata = _make_10x_adata(n=10, n_exp=5, n_guide=3)
-    adata.X[0, 5] = 5
-    adata.X[0, 6] = 5
-    adata.X[0, 7] = 5
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        screen = _load_10x(
-            adata,
-            expression_feature_type="Gene Expression",
-            guide_feature_type="CRISPR Guide Capture",
-            guide_threshold=1,
-            multi_guide="allow",
-            source_format="10x-h5",
-            source_path="fake.h5",
-            covariate_file=None,
-            covariate_keys=None,
-        )
-    assert not any("more than one guide" in str(w.message) for w in caught)
-    assert screen.G[0].sum() == 3.0
-
-
-def test_load_10x_covariate_file(tmp_path):
-    adata = _make_10x_adata(n=10, n_exp=5, n_guide=2)
-    rng = np.random.default_rng(0)
-
-    cov_df = pd.DataFrame(
-        {"batch": rng.choice(["A", "B"], 10), "depth": rng.normal(0, 1, 10)},
-        index=list(adata.obs_names),
-    )
-    cov_path = tmp_path / "covariates.csv"
-    cov_df.to_csv(cov_path)
-
-    screen = _load_10x(
-        adata,
-        expression_feature_type="Gene Expression",
-        guide_feature_type="CRISPR Guide Capture",
-        guide_threshold=1,
-        multi_guide="allow",
-        source_format="10x-h5",
-        source_path="fake.h5",
-        covariate_file=str(cov_path),
-        covariate_keys=["batch", "depth"],
-    )
-    assert screen.covariates is not None
-    assert screen.covariates.shape == (10, 2)
+    assert screen.cell_names == ["cell_0", "cell_2", "cell_4", "cell_6"]
+    assert screen.perturbation_names == ["target_a", "target_b"]
+    assert screen.X.shape == (4, 4)
+    assert screen.G.shape == (4, 2)
     assert screen.covariate_names == ["batch", "depth"]
+    assert screen.source["n_input_obs"] == 8
 
 
-def test_load_10x_covariate_file_missing_barcode(tmp_path):
-    adata = _make_10x_adata(n=10, n_exp=5, n_guide=2)
-    rng = np.random.default_rng(0)
+def test_load_10x_metadata_rejects_unknown_barcode(tmp_path):
+    adata = _make_10x_adata(n=4, n_exp=3, n_assay=2)
+    metadata_path = tmp_path / "metadata.csv"
+    pd.DataFrame({"target": ["target_a"]}, index=["not_in_matrix"]).to_csv(metadata_path)
 
-    # Only 5 of 10 barcodes present
-    cov_df = pd.DataFrame(
-        {"depth": rng.normal(0, 1, 5)},
-        index=list(adata.obs_names)[:5],
+    with pytest.raises(ValueError, match="not present in the 10x matrix"):
+        _load_10x(
+            adata,
+            expression_feature_type="Gene Expression",
+            source_format="10x-h5",
+            source_path="fake.h5",
+            metadata_path=str(metadata_path),
+            guide_key="target",
+        )
+
+
+def test_load_10x_h5_adapter_keeps_expression_sparse(tmp_path):
+    path = write_10x_h5(tmp_path / "screen.h5")
+    metadata = _write_metadata(tmp_path / "metadata.csv", [f"cell_{index}" for index in range(6)])
+    screen = load_screen(
+        str(path),
+        format="10x-h5",
+        metadata_path=str(metadata),
+        guide_key="target",
+        control_label="control",
     )
-    cov_path = tmp_path / "covariates.csv"
-    cov_df.to_csv(cov_path)
 
-    with pytest.raises(ValueError, match="barcodes not found in covariate file"):
-        _load_10x(
-            adata,
-            expression_feature_type="Gene Expression",
-            guide_feature_type="CRISPR Guide Capture",
-            guide_threshold=1,
-            multi_guide="allow",
-            source_format="10x-h5",
-            source_path="fake.h5",
-            covariate_file=str(cov_path),
-            covariate_keys=["depth"],
-        )
+    assert isinstance(screen.X, jax_sparse.JAXSparse)
+    assert screen.X.shape == (6, 3)
+    assert screen.G.shape == (6, 2)
+    assert screen.gene_names == ["gene_1", "gene_2", "gene_3"]
+    assert screen.perturbation_names == ["target_a", "target_b"]
 
 
-def test_load_10x_covariate_file_without_keys_raises(tmp_path):
-    adata = _make_10x_adata(n=5, n_exp=3, n_guide=2)
-    cov_path = tmp_path / "cov.csv"
-    pd.DataFrame({"x": [1] * 5}, index=list(adata.obs_names)).to_csv(cov_path)
+def test_load_10x_mex_adapter_keeps_expression_sparse(tmp_path):
+    path = write_10x_mex(tmp_path / "mex")
+    metadata = _write_metadata(tmp_path / "metadata.csv", [f"cell_{index}" for index in range(6)])
+    screen = load_screen(
+        str(path),
+        format="10x-mex",
+        metadata_path=str(metadata),
+        guide_key="target",
+        control_label="control",
+    )
 
-    with pytest.raises(ValueError, match="covariates= must be provided alongside covariate_file"):
-        _load_10x(
-            adata,
-            expression_feature_type="Gene Expression",
-            guide_feature_type="CRISPR Guide Capture",
-            guide_threshold=1,
-            multi_guide="allow",
-            source_format="10x-h5",
-            source_path="fake.h5",
-            covariate_file=str(cov_path),
-            covariate_keys=None,
-        )
-
-
-def test_load_screen_10x_covariates_without_file_raises():
-    from perturbvi import load_screen
-
-    with pytest.raises(ValueError, match="covariate_file="):
-        load_screen("fake.h5", format="10x-h5", covariates=["batch"])
+    assert isinstance(screen.X, jax_sparse.JAXSparse)
+    assert screen.X.shape == (6, 3)
+    assert screen.G.shape == (6, 2)

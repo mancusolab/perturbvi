@@ -1,6 +1,9 @@
-# pattern: Functional Core
+from __future__ import annotations
 
+# pattern: Functional Core
 import logging
+import math
+import numbers
 
 from typing import get_args, Literal, NamedTuple, Optional, Tuple
 
@@ -22,7 +25,7 @@ from .common import (
 from .factorloadings import FactorModel, LoadingModel
 from .guide import DenseGuideModel, GuideModel, SparseGuideModel
 from .log import get_logger
-from .sparse import CenteredSparseMatrix, SparseMatrix
+from .sparse import CenteredSparseMatrix, sparse_column_variance, SparseMatrix
 from .utils import prob_pca
 
 
@@ -30,6 +33,22 @@ log = get_logger("perturbvi")
 log.setLevel(logging.INFO)
 
 _init_type = Literal["pca", "random"]
+
+
+def _normalize_sparse_matrix(matrix: sparse.JAXSparse, name: str) -> sparse.BCOO:
+    """Normalize supported 2D JAX sparse layouts without materializing them."""
+    if isinstance(matrix, sparse.BCOO):
+        return matrix
+    if isinstance(matrix, sparse.BCSR):
+        row_counts = jnp.diff(matrix.indptr)
+        rows = jnp.repeat(
+            jnp.arange(matrix.shape[0], dtype=matrix.indices.dtype),
+            row_counts,
+            total_repeat_length=matrix.nse,
+        )
+        coordinates = jnp.stack((rows, matrix.indices), axis=1)
+        return sparse.BCOO((matrix.data, coordinates), shape=matrix.shape)
+    raise ValueError(f"{name} uses unsupported JAX sparse layout {type(matrix).__name__}; use BCOO or BCSR")
 
 
 @dispatch
@@ -50,6 +69,16 @@ def _column_sumsq(X: ArrayLike):
 @dispatch
 def _column_sumsq(X: sparse.JAXSparse):
     return sparse.sparsify(jnp.sum)(X**2, axis=0).todense()  # type: ignore
+
+
+@dispatch
+def _column_variance(X: ArrayLike):
+    return jnp.var(jnp.asarray(X), axis=0)
+
+
+@dispatch
+def _column_variance(X: sparse.JAXSparse):
+    return sparse_column_variance(X, X.dtype)
 
 
 def _update_tau(X: DataMatrix, factor: FactorModel, loadings: LoadingModel, params: ModelParams) -> ModelParams:
@@ -134,7 +163,7 @@ def compute_elbo(
     # or just ignore it
     exp_logl = (-0.5 * params.tau) * (
         params.x_ssq
-        - 2 * jnp.einsum("kp,np,nk->", mean_w, X, mean_z)  # tr(E[W] @ X.T @ E[Z])
+        - 2 * jnp.sum(mean_w * (X.T @ mean_z).T)
         + jnp.einsum("ij,ji->", mean_zz, mean_ww)  # tr(E[Z.T @ Z] @ E[W @ W.T])
     ) + 0.5 * n_dim * p_dim * jnp.log(params.tau)
 
@@ -243,25 +272,35 @@ def _init_params(
     p_prior: float = 0.5,
     tau: float = 1.0,
     init: _init_type = "pca",
+    verbose: bool = True,
 ) -> ModelParams:
-    log.info("Starting model parameter initialization...")
+    if verbose:
+        log.info("Starting model parameter initialization...")
 
     # Base parameters
     n_dim, p_dim = X.shape
     tau_0 = jnp.ones((l_dim, z_dim))
     tau_0.block_until_ready()
-    log.info("✓ Base parameters initialized (5%)")
+    if verbose:
+        log.info("✓ Base parameters initialized (5%)")
 
     # Random keys
     keys = random.split(rng_key, 10)
     keys[0].block_until_ready()
     rng_key, svd_key, mu_key, var_key, muw_key, varw_key, alpha_key, beta_key, var_beta_key, theta_key = keys
-    log.info("✓ Random keys setup (10%)")
+    if verbose:
+        log.info("✓ Random keys setup (10%)")
 
     # Data statistics
-    x_ssq = jnp.sum(X * X)
+    if isinstance(X, CenteredSparseMatrix):
+        if X.squared_norm is None:
+            raise ValueError("Sparse X squared norm is unavailable for this centering configuration")
+        x_ssq = X.squared_norm
+    else:
+        x_ssq = jnp.sum(X * X)
     x_ssq.block_until_ready()
-    log.info("✓ Data statistics computed (15%)")
+    if verbose:
+        log.info("✓ Data statistics computed (15%)")
 
     # Factors
     if init == "pca":
@@ -269,25 +308,29 @@ def _init_params(
     else:
         init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
     init_mu_z.block_until_ready()
-    log.info("✓ Factors initialized (35%)")
+    if verbose:
+        log.info("✓ Factors initialized (35%)")
 
     # Factor variance
     init_var_z = jnp.diag(random.normal(var_key, shape=(z_dim,)) ** 2)
     init_var_z.block_until_ready()
-    log.info("✓ Factor variance set (45%)")
+    if verbose:
+        log.info("✓ Factor variance set (45%)")
 
     # Loadings
     init_mu_w = random.normal(muw_key, shape=(l_dim, z_dim, p_dim)) * 1e-3
     init_var_w = (1 / tau_0) * (random.normal(varw_key, shape=(l_dim, z_dim))) ** 2
     init_mu_w.block_until_ready()
     init_var_w.block_until_ready()
-    log.info("✓ Loadings initialized (60%)")
+    if verbose:
+        log.info("✓ Loadings initialized (60%)")
 
     # Alpha and pi
     # init_alpha = random.dirichlet(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
     # init_alpha =jax.jit(random.dirichlet)(alpha_key, alpha=jnp.ones(p_dim), shape=(l_dim, z_dim))
     init_alpha = jnp.full((l_dim, z_dim, p_dim), 1.0 / p_dim)
-    log.info("Avoid dirichlet process")
+    if verbose:
+        log.info("Avoid dirichlet process")
     init_alpha.block_until_ready()
     if isinstance(annotations, AnnotationPriorModel):
         p_dim, m = annotations.shape
@@ -299,7 +342,8 @@ def _init_params(
         theta = None
         pi = jnp.ones(shape=(z_dim, p_dim)) / p_dim
         pi.block_until_ready()
-    log.info("✓ Annotations setup complete (75%)")
+    if verbose:
+        log.info("✓ Annotations setup complete (75%)")
 
     # Perturbation effects
     n_dim, g_dim = guide.shape
@@ -309,7 +353,8 @@ def _init_params(
     tau_beta.block_until_ready()
     init_mu_beta.block_until_ready()
     init_var_beta.block_until_ready()
-    log.info("✓ Perturbation effects initialized (90%)")
+    if verbose:
+        log.info("✓ Perturbation effects initialized (90%)")
 
     # Priors
     if p_prior is not None:
@@ -317,9 +362,11 @@ def _init_params(
         p_prior.block_until_ready()
     p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
     p_hat.block_until_ready()
-    log.info("✓ Priors setup complete (100%)")
+    if verbose:
+        log.info("✓ Priors setup complete (100%)")
 
-    log.info("✓ Model parameter initialization completed successfully")
+    if verbose:
+        log.info("✓ Model parameter initialization completed successfully")
 
     return ModelParams(
         x_ssq,
@@ -352,14 +399,28 @@ def _check_args(
     # pull type options for init
     type_options = get_args(_init_type)
 
-    if isinstance(X, ArrayLike):
-        X = jnp.asarray(X)
+    if isinstance(z_dim, bool) or not isinstance(z_dim, numbers.Integral):
+        raise ValueError(f"z_dim must be a positive integer; received {z_dim!r}")
+    if isinstance(l_dim, bool) or not isinstance(l_dim, numbers.Integral):
+        raise ValueError(f"l_dim must be a positive integer; received {l_dim!r}")
+    if not isinstance(init, str) or init not in type_options:
+        raise ValueError(f"Unknown initialization provided {init!r}; Choices: {type_options}")
+
+    if isinstance(X, sparse.JAXSparse):
+        X = _normalize_sparse_matrix(X, "X")
+    else:
+        try:
+            X = jnp.asarray(X)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("X must be a dense array-like or JAX sparse matrix") from exc
 
     if X.ndim != 2:
         raise ValueError(f"Shape of X = {X.shape}; Expected 2-dim matrix")
 
     # should we check for n < p?
     n_dim, p_dim = X.shape
+    if n_dim <= 0 or p_dim <= 0:
+        raise ValueError(f"X should contain at least one row and column: received shape {X.shape}")
 
     # dim checks
     if l_dim > p_dim:
@@ -376,8 +437,13 @@ def _check_args(
     if not _is_valid(X):
         raise ValueError("X contains 'nan/inf'. Please check input data for correctness or missingness")
 
-    if isinstance(G, ArrayLike):
-        G = jnp.asarray(G)
+    if isinstance(G, sparse.JAXSparse):
+        G = _normalize_sparse_matrix(G, "G")
+    else:
+        try:
+            G = jnp.asarray(G)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("G must be a dense array-like or JAX sparse matrix") from exc
     if G.ndim != 2:
         raise ValueError(f"Dimension of guide matrix G should be 2: received {len(G.shape)}")
     g_n_dim, g_dim = G.shape
@@ -394,8 +460,13 @@ def _check_args(
         raise ValueError(f"G contains all-zero perturbation columns at indices {zero_cols.tolist()}")
 
     if A is not None:
-        if isinstance(A, ArrayLike):
-            A = jnp.asarray(A)
+        if isinstance(A, sparse.JAXSparse):
+            A = _normalize_sparse_matrix(A, "A")
+        else:
+            try:
+                A = jnp.asarray(A)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("A must be a dense array-like or JAX sparse matrix") from exc
         if A.ndim != 2:
             raise ValueError(f"Dimension of annotation matrix A should be 2: received {len(A.shape)}")
         a_p_dim, _ = A.shape
@@ -405,28 +476,70 @@ def _check_args(
             )
         if not _is_valid(A):
             raise ValueError("A contains 'nan/inf'. Please check input data for correctness or missingness")
-    # type check for init
-
-    if init not in type_options:
-        raise ValueError(f"Unknown initialization provided '{init}'; Choices: {type_options}")
+        if A.shape[1] <= 0:
+            raise ValueError("Annotation matrix A should contain at least one annotation column")
 
     return X, G, A  # type: ignore
 
 
+def _check_control_args(
+    *,
+    p_prior: Optional[float],
+    tau: float,
+    standardize: bool,
+    learning_rate: float,
+    max_iter: int,
+    tol: float,
+    seed: int,
+    verbose: bool,
+) -> None:
+    def finite_float(value, name: str) -> float:
+        if isinstance(value, (str, bytes)):
+            raise ValueError(f"{name} must be a finite numeric scalar; received {value!r}")
+        try:
+            result = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must be a finite numeric scalar; received {value!r}") from exc
+        if not math.isfinite(result):
+            raise ValueError(f"{name} must be finite; received {value}")
+        return result
+
+    if p_prior is not None:
+        p_prior_value = finite_float(p_prior, "p_prior")
+        if not 0 <= p_prior_value <= 1:
+            raise ValueError(f"p_prior must be between 0 and 1; received {p_prior}")
+    tau_value = finite_float(tau, "tau")
+    if tau_value <= 0:
+        raise ValueError(f"tau must be finite and positive; received {tau}")
+    if not isinstance(standardize, (bool, jnp.bool_)):
+        raise ValueError(f"standardize must be boolean; received {standardize!r}")
+    learning_rate_value = finite_float(learning_rate, "learning_rate")
+    if learning_rate_value <= 0:
+        raise ValueError(f"learning_rate must be finite and positive; received {learning_rate}")
+    if isinstance(max_iter, bool) or not isinstance(max_iter, numbers.Integral) or max_iter <= 0:
+        raise ValueError(f"max_iter must be a positive integer; received {max_iter}")
+    tol_value = finite_float(tol, "tol")
+    if tol_value <= 0:
+        raise ValueError(f"tol must be finite and positive; received {tol}")
+    if isinstance(seed, bool) or not isinstance(seed, numbers.Integral):
+        raise ValueError(f"seed must be an integer; received {seed!r}")
+    if not isinstance(verbose, (bool, jnp.bool_)):
+        raise ValueError(f"verbose must be boolean; received {verbose!r}")
+
+
 class InferResults(NamedTuple):
-    """Define the results object returned by function :py:obj:`susie_pca`.
+    """Results returned by :func:`infer` and :func:`perturbvi.fit_screen`.
 
     Attributes:
-        params: the dictionary contain all the infered parameters
-        elbo: the value of ELBO
-        pve: the ndarray of percent of variance explained
-        pip: the ndarray of posterior inclusion probabilities
-        W: the posterior mean parameter for loadings
-
+        params: Inferred model parameters.
+        elbo: Final ELBO components, or ``None`` for results reopened from disk.
+        pve: Percent of variance explained for each latent factor.
+        pip: Posterior inclusion probabilities, with shape factors by genes.
+        W: Posterior mean loadings, exposed as a property of ``params``.
     """
 
     params: ModelParams
-    elbo: ELBOResults
+    elbo: Optional[ELBOResults]
     pve: Array
     pip: Array
 
@@ -451,49 +564,57 @@ def infer(
     seed: int = 0,
     verbose: bool = True,
 ) -> InferResults:
-    """The main inference function for SuSiE PCA.
+    """Fit PerturbVI from preprocessed array inputs.
 
-    **Arguments:**
+    Args:
+        X: Cell-by-gene expression matrix. Dense array-like and JAX sparse
+            matrices are supported.
+        z_dim: Number of latent factors.
+        l_dim: Number of single effects per factor.
+        G: Cell-by-perturbation guide design matrix. The positional argument
+            remains part of the stable low-level contract.
+        A: Optional gene-by-annotation matrix for parameterized loading priors.
+        p_prior: Prior inclusion probability for perturbation effects. ``None``
+            or zero selects deterministic dense guide regression.
+        tau: Positive initial residual precision.
+        standardize: Center every expression column and scale it to unit
+            population variance. Constant columns are rejected.
+        init: Latent-factor initialization, either ``"pca"`` or ``"random"``.
+        learning_rate: Positive optimizer learning rate used only with ``A``.
+        max_iter: Positive maximum number of variational iterations.
+        tol: Positive absolute ELBO convergence tolerance.
+        seed: Integer JAX random seed.
+        verbose: Log initialization, iteration, and convergence progress.
 
-    -`X` [`Array`|`JAXSparse`]: The expression count matrix. Should be an array-like or sparse JAX matrix.
+    Returns:
+        Inferred parameters, ELBO, PVE, and PIP values.
 
-    -`z_dim` [`int`]: The latent dimension.
-
-    -`l_dim` [`int`]: The number of single effects in each factor.
-
-    -`G` [`Array`|`JAXSparse`]: Perturbation density matrix. Should be an array-like or sparse JAX matrix.
-
-    -`A` [`Array`]: Annotation matrix to use in parameterized-prior mode. If not `None`, leading dimension
-        should match the feature dimension of X.
-
-    -`p_prior` [`float`]: Prior probability for each perturbation to have a non-zero effect to predict latent factor.
-        (default = 0.5)
-
-    -`tau` [`float`]: initial value of residual precision (default = 1)
-
-    -`standardize` [`bool`]: Whether to scale the input data with variance 1 (default = False)
-
-    -`init` [`str`]: How to initialize the variational mean parameters for latent factors.
-        Either "pca" or "random" (default = "pca").
-
-    -`learning_rate` [`float`]: Learning rate for prior annotation probability inference. Not used if `A` is `None`.
-
-    -`max_iter` [`int`]: Maximum number of iterations for inference.
-
-    -`tol` [`float`]: Convergence tolerance for inference.
-
-    -`seed` [`int`]: Numerical tolerance for ELBO convergence.
-
-    -`verbose` [`bool`]: Flag to indicate displaying log information (ELBO value) in each
-            iteration.
-
-    **Returns:**
-
-    An [`InferResults`][] object  contain all the inferred parameters.
+    Raises:
+        ValueError: If dimensions, values, guide columns, or scalar controls are
+            invalid. Validation occurs before the iterative fit begins.
     """
 
-    # sanity check arguments
+    # Validate cheap scalar controls before copying or transferring matrices.
+    _check_control_args(
+        p_prior=p_prior,
+        tau=tau,
+        standardize=standardize,
+        learning_rate=learning_rate,
+        max_iter=max_iter,
+        tol=tol,
+        seed=seed,
+        verbose=verbose,
+    )
     X, G, A = _check_args(X, G, A, z_dim, l_dim, init)
+
+    if standardize:
+        variances = _column_variance(X)
+        invalid_scale = jnp.where((~jnp.isfinite(variances)) | (variances <= 0))[0]
+        if invalid_scale.size:
+            raise ValueError(
+                "Cannot standardize X because columns have zero or invalid variance at indices "
+                f"{invalid_scale.tolist()}"
+            )
 
     # cast to jax array
     if isinstance(X, Array):
@@ -524,7 +645,20 @@ def infer(
     rng_key = random.PRNGKey(seed)
     factors = FactorModel()
     loadings = LoadingModel()
-    params = _init_params(rng_key, z_dim, l_dim, X, guide, factors, loadings, annotation, p_prior, tau, init)
+    params = _init_params(
+        rng_key,
+        z_dim,
+        l_dim,
+        X,
+        guide,
+        factors,
+        loadings,
+        annotation,
+        p_prior,
+        tau,
+        init,
+        verbose,
+    )
 
     #  core loop for inference
     elbo = -5e25

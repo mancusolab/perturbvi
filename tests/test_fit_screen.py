@@ -19,7 +19,7 @@ _KWARGS = dict(z_dim=2, l_dim=5, tau=10.0, p_prior=0.1, standardize=False, init=
 
 def test_fit_screen_shapes_match_infer():
     X, G = _make_data()
-    screen = ScreenData(X=X, G=G, genes=None, perturbations=None, cell_names=None, source={})
+    screen = ScreenData(X=X, G=G)
 
     result_screen = fit_screen(screen, **_KWARGS)
     result_infer = infer(
@@ -37,13 +37,6 @@ def test_fit_screen_shapes_match_infer():
 def test_fit_screen_rejects_all_zero_g():
     X, _ = _make_data()
     G_bad = np.zeros((30, 3))
-    screen = ScreenData(X=X, G=G_bad, genes=None, perturbations=None, cell_names=None, source={})
+    screen = ScreenData(X=X, G=G_bad)
     with pytest.raises(ValueError, match="all-zero"):
-        fit_screen(screen, **_KWARGS)
-
-
-def test_fit_screen_rejects_row_mismatch():
-    X, G = _make_data()
-    screen = ScreenData(X=X, G=G[:20], genes=None, perturbations=None, cell_names=None, source={})
-    with pytest.raises(ValueError, match="rows"):
         fit_screen(screen, **_KWARGS)

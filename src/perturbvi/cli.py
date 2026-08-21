@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -5,108 +7,203 @@ import sys
 
 from pathlib import Path
 
-import numpy as np
-
 from .log import get_logger
 
 
-def _setup_jax(device: str) -> None:
+def _optional_integer(value: str):
+    if value.lower() in {"none", "null"}:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected an integer or 'none'") from exc
+
+
+def _setup_jax(device: str) -> str:
     import jax
+
     jax.config.update("jax_enable_x64", True)
     jax.config.update("jax_default_matmul_precision", "highest")
-    if device == "cpu":
-        jax.config.update("jax_default_device", jax.devices("cpu")[0])
+    try:
+        devices = jax.devices(device)
+    except RuntimeError as exc:
+        raise RuntimeError(f"Requested JAX device '{device}' is not available") from exc
+    if not devices:
+        raise RuntimeError(f"Requested JAX device '{device}' is not available")
+    jax.config.update("jax_default_device", devices[0])
+    return str(devices[0])
 
 
-def _read_names(path: str) -> list:
-    """Read one name per line from a .csv or .txt file (no header assumed for csv)."""
+def _read_names(path: str) -> list[str]:
     import pandas as pd
-    p = Path(path)
-    if p.suffix == ".csv":
-        return pd.read_csv(p, header=None)[0].tolist()
-    return [line.strip() for line in p.read_text().splitlines() if line.strip()]
+
+    names_path = Path(path)
+    if not names_path.is_file():
+        raise FileNotFoundError(f"Name file does not exist: {names_path}")
+    if names_path.suffix.lower() == ".csv":
+        names = pd.read_csv(names_path, header=None).iloc[:, 0].astype(str).tolist()
+    else:
+        names = [line.strip() for line in names_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if len(set(names)) != len(names):
+        raise ValueError(f"Name file contains duplicates: {names_path}")
+    return names
 
 
-def _add_fit_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("input", help="Path to .h5ad file, 10x H5 file, or 10x MEX directory")
-    p.add_argument(
-        "--format", dest="format", default="auto",
-        choices=["auto", "h5ad", "10x-h5", "10x-mex"],
-        help="Input format (default: auto-detect from extension)",
+def _add_fit_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "input",
+        help="Path to .h5ad, 10x H5/MEX, or a small CSV/TSV expression matrix",
     )
-    p.add_argument("--output", required=True, help="Results output directory")
-    p.add_argument("--z-dim", type=int, required=True, help="Number of latent factors")
-    p.add_argument("--l-dim", type=int, required=True, help="Number of single effects per factor")
-    p.add_argument("--tau", type=float, required=True, help="Residual precision initial value")
-    p.add_argument("--layer", default="X", help="Expression layer in .h5ad (default: X uses adata.X)")
-    p.add_argument("--guide-key", default=None, help="adata.obs column to build one-hot G from (h5ad)")
-    p.add_argument("--guide-obsm", default=None, help="adata.obsm key for existing guide matrix (h5ad)")
-    p.add_argument("--control-label", default=None, help="Perturbation label to drop from G columns")
-    p.add_argument(
-        "--guide-threshold", type=int, default=1,
-        help="UMI count threshold to binarize guide counts (10x only, default: 1)",
+    parser.add_argument(
+        "--format",
+        default="auto",
+        choices=["auto", "h5ad", "10x-h5", "10x-mex", "csv", "tsv"],
+        help="Input format (default: auto-detect)",
     )
-    p.add_argument(
-        "--expression-feature-type", default="Gene Expression",
-        help="Feature type string for expression matrix (10x only)",
+    parser.add_argument("--output", required=True, help="Results output directory")
+    parser.add_argument("--z-dim", type=int, required=True, help="Number of latent factors")
+    parser.add_argument("--l-dim", type=int, required=True, help="Number of single effects per factor")
+    parser.add_argument("--tau", type=float, required=True, help="Positive residual precision initial value")
+    parser.add_argument("--layer", default="X", help="Expression layer for .h5ad input")
+    parser.add_argument("--guide-key", default=None, help="Observation/metadata column used to construct guides")
+    parser.add_argument("--guide-obsm", default=None, help="AnnData obsm key containing an existing guide matrix")
+    parser.add_argument("--guide-matrix", dest="guide_path", default=None, help="Guide CSV/TSV for delimited input")
+    parser.add_argument(
+        "--metadata",
+        dest="metadata_path",
+        default=None,
+        help="Cell/barcode-indexed labels and covariates for delimited or 10x input",
     )
-    p.add_argument(
-        "--guide-feature-type", default="CRISPR Guide Capture",
-        help="Feature type string for guide capture (10x only)",
+    parser.add_argument("--control-label", default=None, help="Control label/column to exclude from G")
+    parser.add_argument(
+        "--missing-guide",
+        choices=["error", "unassigned"],
+        default="error",
+        help="Policy for missing guide labels (default: error)",
     )
-    p.add_argument(
-        "--covariates", nargs="+", default=None,
-        help="Covariate column names (h5ad: from adata.obs; 10x: from --covariate-file)",
+    parser.add_argument("--expression-feature-type", default="Gene Expression")
+    parser.add_argument(
+        "--covariates",
+        nargs="+",
+        default=None,
+        help="Covariates from obs/metadata, residualized before standardization",
     )
-    p.add_argument(
-        "--covariate-file", default=None,
-        help="Barcode-indexed CSV/TSV of covariates (10x only; use with --covariates)",
+    parser.add_argument(
+        "--categorical-covariates",
+        dest="categorical_covariates",
+        nargs="+",
+        default=None,
+        help="Subset of covariates treated as categorical",
     )
-    p.add_argument(
-        "--categoricals", nargs="+", default=None,
-        help="Subset of --covariates to treat as categorical (one-hot encoded)",
+    parser.add_argument(
+        "--header",
+        type=_optional_integer,
+        default=0,
+        help="Header row for delimited input, or 'none' (default: 0)",
     )
-    p.add_argument(
-        "--multi-guide", default="warn", choices=["allow", "warn", "error"],
-        help="Policy for cells with >1 guide assignment (10x only, default: warn)",
+    parser.add_argument(
+        "--index-col",
+        type=_optional_integer,
+        default=0,
+        help="Cell-name column for delimited input, or 'none' (default: 0)",
     )
-    p.add_argument("--p-prior", type=float, default=0.1, help="Prior perturbation inclusion probability (default: 0.1)")
-    p.add_argument(
-        "--standardize", action=argparse.BooleanOptionalAction, default=True,
-        help="Standardize expression to unit variance before fitting (default: on)",
+    parser.add_argument("--p-prior", type=float, default=0.1)
+    parser.add_argument(
+        "--standardize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Standardize expression after optional residualization (default: on)",
     )
-    p.add_argument("--init", default="pca", choices=["random", "pca"], help="Factor init (default: random)")
-    p.add_argument("--max-iter", type=int, default=500, help="Maximum ELBO iterations (default: 500)")
-    p.add_argument("--tol", type=float, default=1e-2, help="ELBO convergence tolerance (default: 1e-2)")
-    p.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
-    p.add_argument("--device", choices=["cpu", "gpu"], default="cpu", help="JAX device (default: cpu)")
-    p.add_argument("--verbose", action="store_true", default=False)
+    parser.add_argument("--init", default="random", choices=["random", "pca"], help="Factor initialization")
+    parser.add_argument("--max-iter", type=int, default=500)
+    parser.add_argument("--tol", type=float, default=1e-2)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--device", choices=["cpu", "gpu"], default="cpu")
+    parser.add_argument("--verbose", action="store_true", default=False)
 
 
-def _add_analyze_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("results_dir", help="Directory produced by perturbvi fit or save_results()")
-    p.add_argument("--genes", default=None, help=".csv or .txt file with gene names, one per line")
-    p.add_argument(
-        "--perturbations", default=None,
-        help=".csv or .txt file with perturbation names, one per line",
+def _add_analyze_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("results_dir", help="Directory produced by perturbvi fit or save_results()")
+    parser.add_argument("--gene-names", dest="gene_names", default=None)
+    parser.add_argument(
+        "--perturbation-names",
+        dest="perturbation_names",
+        default=None,
     )
-    p.add_argument(
-        "--output", default=None,
-        help="Analysis output directory (default: <results_dir>/analysis)",
-    )
-    p.add_argument(
-        "--compute-lfsr", action="store_true", default=False,
-        help="Compute LFSR (expensive Monte Carlo step; off by default)",
-    )
-    p.add_argument("--lfsr-iters", type=int, default=2000, help="Monte Carlo iterations for LFSR (default: 2000)")
-    p.add_argument("--verbose", action="store_true", default=False)
+    parser.add_argument("--output", default=None, help="Output directory (default: <results_dir>/analysis)")
+    parser.add_argument("--pip-threshold", type=float, default=0.9)
+    parser.add_argument("--lfsr-threshold", type=float, default=0.05)
+    parser.add_argument("--rho-prime", type=float, default=0.1)
+    parser.add_argument("--compute-lfsr", action="store_true", default=False)
+    parser.add_argument("--lfsr-iters", type=int, default=2000)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--verbose", action="store_true", default=False)
 
 
-def _cmd_fit(args, log) -> None:
-    from perturbvi import fit_screen, load_screen, save_results
+def _json_default(value):
+    if isinstance(value, Path):
+        return str(value)
+    if hasattr(value, "item"):
+        return value.item()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
-    out = Path(args.output)
-    out.mkdir(parents=True, exist_ok=True)
+
+def _write_fit_metadata(args, screen, output: Path, selected_device: str) -> None:
+    preprocessing_steps = []
+    if args.covariates:
+        preprocessing_steps.append("residualize")
+    if args.standardize:
+        preprocessing_steps.append("standardize")
+    run_config = {
+        "input": args.input,
+        "format": screen.source.get("format", args.format),
+        "output": str(output),
+        "z_dim": args.z_dim,
+        "l_dim": args.l_dim,
+        "tau": args.tau,
+        "layer": args.layer,
+        "guide_key": args.guide_key,
+        "guide_obsm": args.guide_obsm,
+        "guide_matrix": args.guide_path,
+        "metadata": args.metadata_path,
+        "control_label": args.control_label,
+        "missing_guide": args.missing_guide,
+        "expression_feature_type": args.expression_feature_type,
+        "covariates": args.covariates,
+        "categorical_covariates": args.categorical_covariates,
+        "header": args.header,
+        "index_col": args.index_col,
+        "p_prior": args.p_prior,
+        "standardize": args.standardize,
+        "preprocessing_steps": preprocessing_steps,
+        "preprocessing_order": "_then_".join(preprocessing_steps) if preprocessing_steps else "none",
+        "init": args.init,
+        "max_iter": args.max_iter,
+        "tol": args.tol,
+        "seed": args.seed,
+        "device": args.device,
+        "selected_device": selected_device,
+        "verbose": args.verbose,
+    }
+    input_summary = {
+        "source": dict(screen.source),
+        "X_shape": list(screen.X.shape),
+        "G_shape": list(screen.G.shape),
+        "n_genes": len(screen.gene_names) if screen.gene_names is not None else None,
+        "n_perturbations": len(screen.perturbation_names) if screen.perturbation_names is not None else None,
+        "n_cells": len(screen.cell_names) if screen.cell_names is not None else None,
+        "gene_names_file": "gene_names.txt" if screen.gene_names is not None else None,
+        "perturbation_names_file": "perturbation_names.txt" if screen.perturbation_names is not None else None,
+    }
+    for filename, payload in {"run_config.json": run_config, "input_summary.json": input_summary}.items():
+        (output / filename).write_text(
+            json.dumps(payload, indent=2, default=_json_default) + "\n",
+            encoding="utf-8",
+        )
+
+
+def _cmd_fit(args, log, selected_device: str) -> None:
+    from perturbvi import fit_screen, load_screen, residualize_screen, save_results
 
     log.info(f"Loading screen from: {args.input}")
     screen = load_screen(
@@ -115,22 +212,26 @@ def _cmd_fit(args, log) -> None:
         layer=args.layer,
         guide_key=args.guide_key,
         guide_obsm=args.guide_obsm,
+        guide_path=args.guide_path,
+        metadata_path=args.metadata_path,
         control_label=args.control_label,
-        guide_threshold=args.guide_threshold,
+        missing_guide=args.missing_guide,
         expression_feature_type=args.expression_feature_type,
-        guide_feature_type=args.guide_feature_type,
         covariates=args.covariates,
-        covariate_file=args.covariate_file,
-        multi_guide=args.multi_guide,
+        header=args.header,
+        index_col=args.index_col,
     )
-    log.info(f"Loaded: X={np.array(screen.X).shape}, G={np.array(screen.G).shape}")
+    log.info(f"Loaded: X={screen.X.shape}, G={screen.G.shape}")
 
     if args.covariates:
-        from perturbvi import residualize_screen
         log.info(f"Residualizing covariates: {args.covariates}")
-        screen = residualize_screen(screen, categoricals=args.categoricals)
+        screen = residualize_screen(
+            screen,
+            covariates=args.covariates,
+            categorical_covariates=args.categorical_covariates,
+        )
 
-    log.info("Starting inference...")
+    log.info("Starting inference")
     results = fit_screen(
         screen,
         z_dim=args.z_dim,
@@ -142,108 +243,67 @@ def _cmd_fit(args, log) -> None:
         tol=args.tol,
         max_iter=args.max_iter,
         seed=args.seed,
+        verbose=args.verbose,
     )
-    log.info(f"Done. PVE per factor: {np.array(results.pve).round(4).tolist()}")
 
-    save_results(results, path=str(out))
-    log.info(f"Results saved to {out}/")
-
-    run_config = {
-        "input": args.input,
-        "format": args.format,
-        "output": str(out),
-        "z_dim": args.z_dim,
-        "l_dim": args.l_dim,
-        "tau": args.tau,
-        "layer": args.layer,
-        "guide_key": args.guide_key,
-        "guide_obsm": args.guide_obsm,
-        "control_label": args.control_label,
-        "guide_threshold": args.guide_threshold,
-        "covariates": args.covariates,
-        "covariate_file": args.covariate_file,
-        "categoricals": args.categoricals,
-        "multi_guide": args.multi_guide,
-        "p_prior": args.p_prior,
-        "standardize": args.standardize,
-        "init": args.init,
-        "max_iter": args.max_iter,
-        "tol": args.tol,
-        "seed": args.seed,
-        "device": args.device,
-    }
-    with open(out / "run_config.json", "w") as f:
-        json.dump(run_config, f, indent=2)
-
-    X_arr = np.array(screen.X)
-    G_arr = np.array(screen.G)
-    input_summary = {
-        "source": screen.source,
-        "X_shape": list(X_arr.shape),
-        "G_shape": list(G_arr.shape),
-        "n_genes": len(screen.genes) if screen.genes else None,
-        "n_perturbations": len(screen.perturbations) if screen.perturbations else None,
-        "n_cell_names": len(screen.cell_names) if screen.cell_names else None,
-    }
-    with open(out / "input_summary.json", "w") as f:
-        json.dump(input_summary, f, indent=2)
-
-    log.info(f"Metadata written to {out}/run_config.json and {out}/input_summary.json")
+    output = Path(args.output)
+    save_results(
+        results,
+        path=str(output),
+        gene_names=screen.gene_names,
+        perturbation_names=screen.perturbation_names,
+    )
+    _write_fit_metadata(args, screen, output, selected_device)
+    log.info(f"Results and reproducibility metadata saved to {output}")
 
 
 def _cmd_analyze(args, log) -> None:
-    from perturbvi import analyze, load_results
+    from perturbvi import analyze
 
     results_dir = Path(args.results_dir)
-    out = Path(args.output) if args.output else results_dir / "analysis"
-    out.mkdir(parents=True, exist_ok=True)
-
-    genes = _read_names(args.genes) if args.genes else None
-    perturbations = _read_names(args.perturbations) if args.perturbations else None
-
-    log.info(f"Loading results from: {results_dir}")
-    fitted = load_results(str(results_dir))
-
-    log.info("Running analysis...")
+    output = Path(args.output) if args.output else results_dir / "analysis"
+    gene_names = _read_names(args.gene_names) if args.gene_names else None
+    perturbation_names = _read_names(args.perturbation_names) if args.perturbation_names else None
     tables = analyze(
-        fitted,
-        genes=genes,
-        perturbations=perturbations,
+        str(results_dir),
+        gene_names=gene_names,
+        perturbation_names=perturbation_names,
+        pip_threshold=args.pip_threshold,
+        lfsr_threshold=args.lfsr_threshold,
+        rho_prime=args.rho_prime,
         compute_lfsr=args.compute_lfsr,
         lfsr_iters=args.lfsr_iters,
-        path=str(results_dir),
+        seed=args.seed,
     )
-
-    for name, df in tables.items():
-        if df is None:
+    output.mkdir(parents=True, exist_ok=True)
+    for name, table in tables.items():
+        if table is None:
             continue
-        csv_path = out / f"{name}.csv"
-        df.to_csv(csv_path)
-        log.info(f"Saved {csv_path}")
-
-    log.info(f"Analysis complete. Output: {out}/")
+        destination = output / f"{name}.csv"
+        table.to_csv(destination)
+        log.info(f"Saved {destination}")
+    log.info(f"Analysis complete: {output}")
 
 
 def main(args=None):
     parser = argparse.ArgumentParser(
         prog="perturbvi",
-        description="perturbVI: variational inference for single-cell Perturb-seq data",
+        description="PerturbVI: variational inference for single-cell Perturb-seq data",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    _add_fit_args(subparsers.add_parser("fit", help="Fit perturbVI from a screen file"))
-    _add_analyze_args(subparsers.add_parser("analyze", help="Analyze saved perturbVI results"))
-
-    args = parser.parse_args(args)
+    _add_fit_args(subparsers.add_parser("fit", help="Fit PerturbVI from a screen file"))
+    _add_analyze_args(subparsers.add_parser("analyze", help="Analyze saved PerturbVI results"))
+    parsed = parser.parse_args(args)
+    if parsed.command == "fit" and parsed.categorical_covariates and not parsed.covariates:
+        parser.error("--categorical-covariates requires --covariates")
 
     log = get_logger(__name__)
-    log.setLevel(logging.DEBUG if args.verbose else logging.INFO)
-
-    _setup_jax(getattr(args, "device", "cpu"))
-
-    if args.command == "fit":
-        _cmd_fit(args, log)
-    elif args.command == "analyze":
-        _cmd_analyze(args, log)
+    log.setLevel(logging.DEBUG if parsed.verbose else logging.INFO)
+    selected_device = _setup_jax(getattr(parsed, "device", "cpu"))
+    if parsed.command == "fit":
+        _cmd_fit(parsed, log, selected_device)
+    else:
+        _cmd_analyze(parsed, log)
 
 
 def run_cli():

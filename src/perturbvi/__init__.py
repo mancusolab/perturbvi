@@ -14,12 +14,21 @@ from .screen import fit_screen as fit_screen, ScreenData as ScreenData
 from .sim import generate_sim as generate_sim
 
 
-# Legacy exports — commented out; still accessible via:
-#   from perturbvi.utils import analyze_output, compute_lfsr
-#
-# To drop permanently: delete the two lines below and remove from public docs.
-# from .utils import analyze_output as analyze_output
-# from .utils import compute_lfsr as compute_lfsr
+__all__ = (
+    "ScreenData",
+    "__version__",
+    "analyze",
+    "compute_elbo",
+    "compute_pip",
+    "compute_pve",
+    "fit_screen",
+    "generate_sim",
+    "infer",
+    "load_results",
+    "load_screen",
+    "residualize_screen",
+    "save_results",
+)
 
 
 try:
@@ -29,4 +38,4 @@ try:
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "unknown"
 finally:
-    del version, PackageNotFoundError
+    del version, PackageNotFoundError, dist_name

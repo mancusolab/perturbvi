@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
 
-from perturbvi.preprocess import _build_design_matrix, _qr_residualize, residualize_screen
+from perturbvi.preprocess import (
+    _build_design_matrix,
+    residualize_screen,
+)
 from perturbvi.screen import ScreenData
 
 
@@ -16,8 +19,8 @@ def _make_screen(n=50, g=10, p=3, seed=0, covariates=None, covariate_names=None)
     return ScreenData(
         X=X,
         G=G,
-        genes=None,
-        perturbations=None,
+        gene_names=None,
+        perturbation_names=None,
         cell_names=None,
         source={},
         covariates=covariates,
@@ -48,7 +51,7 @@ def test_residualize_categorical_orthogonal():
     screen = _make_screen(n=n, g=g, covariates=batch.reshape(-1, 1), covariate_names=["batch"])
     screen = screen._replace(X=X)
 
-    resid = residualize_screen(screen, categoricals=["batch"])
+    resid = residualize_screen(screen, categorical_covariates=["batch"])
     # residuals should be orthogonal to all dummy columns of batch
     C = _build_design_matrix(batch.reshape(-1, 1), ["batch"], ["batch"])
     for col in range(C.shape[1]):
@@ -59,11 +62,14 @@ def test_residualize_rank_deficient_no_crash():
     rng = np.random.default_rng(2)
     n, g = 40, 8
     c = rng.normal(0, 1, n)
-    # two identical columns → rank deficient design matrix
+    # Two identical columns produce a rank-deficient design matrix.
     covariates = np.column_stack([c, c])
     screen = _make_screen(n=n, g=g, covariates=covariates, covariate_names=["c1", "c2"])
     resid = residualize_screen(screen)
     assert resid.X.shape == (n, g)
+    design = _build_design_matrix(covariates, ["c1", "c2"])
+    expected = screen.X - design @ np.linalg.lstsq(design, screen.X, rcond=None)[0]
+    np.testing.assert_allclose(resid.X, expected, atol=1e-10)
 
 
 def test_residualize_clears_covariates():
@@ -81,10 +87,10 @@ def test_residualize_records_metadata():
     n = 30
     covariates = rng.normal(0, 1, (n, 1))
     screen = _make_screen(n=n, covariates=covariates, covariate_names=["depth"])
-    resid = residualize_screen(screen, categoricals=[])
+    resid = residualize_screen(screen, categorical_covariates=[])
     assert resid.source["residualized"] is True
-    assert resid.source["cov_names"] == ["depth"]
-    assert resid.source["categoricals"] == []
+    assert resid.source["residualized_covariate_names"] == ["depth"]
+    assert resid.source["residualized_categorical_covariates"] == []
 
 
 def test_residualize_no_covariates_raises():
@@ -99,28 +105,57 @@ def test_residualize_unknown_categorical_raises():
     covariates = rng.normal(0, 1, (n, 1))
     screen = _make_screen(n=n, covariates=covariates, covariate_names=["depth"])
     with pytest.raises(ValueError, match="not found in covariate_names"):
-        residualize_screen(screen, categoricals=["batch"])
-
-
-def test_qr_residualize_shape():
-    rng = np.random.default_rng(6)
-    X = rng.normal(0, 1, (50, 15))
-    C = np.column_stack([np.ones(50), rng.normal(0, 1, 50)])
-    R = _qr_residualize(X, C)
-    assert R.shape == X.shape
+        residualize_screen(screen, categorical_covariates=["batch"])
 
 
 def test_build_design_matrix_intercept():
     covariates = np.array([[1.0], [2.0], [3.0]])
-    C = _build_design_matrix(covariates, ["x"], categoricals=None)
+    C = _build_design_matrix(covariates, ["x"], categorical_covariates=None)
     # first column should be all ones (intercept)
     assert np.all(C[:, 0] == 1.0)
     assert C.shape == (3, 2)
 
 
 def test_build_design_matrix_categorical_drops_reference():
-    # 3 categories → 2 dummy columns (reference dropped)
+    # Three categories produce two dummy columns after dropping the reference.
     cats = np.array([0, 1, 2, 0, 1, 2], dtype=float)
-    C = _build_design_matrix(cats.reshape(-1, 1), ["cat"], categoricals=["cat"])
+    C = _build_design_matrix(
+        cats.reshape(-1, 1),
+        ["cat"],
+        categorical_covariates=["cat"],
+    )
     # intercept + 2 dummy columns (not 3)
     assert C.shape == (6, 3)
+
+
+def test_residualize_rejects_intercept_only_design():
+    screen = _make_screen(
+        n=20,
+        covariates=np.ones((20, 1)),
+        covariate_names=["constant"],
+    )
+    with pytest.raises(ValueError, match="non-intercept"):
+        residualize_screen(screen)
+
+
+def test_residualize_selected_covariates_and_canonical_categorical_name():
+    rng = np.random.default_rng(8)
+    n = 30
+    depth = rng.normal(size=n)
+    batch = rng.choice(["A", "B"], size=n)
+    screen = _make_screen(
+        n=n,
+        covariates=np.column_stack([depth, batch]),
+        covariate_names=["depth", "batch"],
+    )
+
+    residualized = residualize_screen(
+        screen,
+        covariates=["batch"],
+        categorical_covariates=["batch"],
+    )
+
+    assert residualized.source["residualized_covariate_names"] == ["batch"]
+    assert residualized.source["residualized_categorical_covariates"] == ["batch"]
+    assert residualized.covariate_names == ["depth"]
+    np.testing.assert_array_equal(np.asarray(residualized.covariates)[:, 0].astype(float), depth)

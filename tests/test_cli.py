@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from .helpers import write_10x_h5
+
 
 @pytest.fixture
 def h5ad_path(tmp_path):
@@ -49,12 +51,37 @@ def test_analyze_missing_results_dir():
         main(["analyze"])  # no results_dir
 
 
-def test_fit_multi_guide_choices():
+def test_fit_categorical_covariates_require_covariates():
     from perturbvi.cli import main
 
     with pytest.raises(SystemExit):
-        main(["fit", "input.h5ad", "--output", "out", "--z-dim", "2", "--l-dim", "5",
-              "--tau", "50", "--guide-key", "x", "--multi-guide", "invalid"])
+        main([
+            "fit", "input.h5ad", "--output", "out", "--z-dim", "2", "--l-dim", "5",
+            "--tau", "50", "--guide-key", "x", "--categorical-covariates", "batch",
+        ])
+
+
+def test_delimited_header_and_index_accept_none(monkeypatch):
+    from perturbvi import cli
+
+    captured = {}
+
+    def fake_setup(device):
+        captured["device"] = device
+        return "cpu:0"
+
+    def fake_fit(args, log, selected_device):
+        captured["header"] = args.header
+        captured["index_col"] = args.index_col
+
+    monkeypatch.setattr(cli, "_setup_jax", fake_setup)
+    monkeypatch.setattr(cli, "_cmd_fit", fake_fit)
+    cli.main([
+        "fit", "expression.csv", "--format", "csv", "--guide-matrix", "guides.csv",
+        "--output", "out", "--z-dim", "1", "--l-dim", "1", "--tau", "1",
+        "--header", "none", "--index-col", "none",
+    ])
+    assert captured == {"device": "cpu", "header": None, "index_col": None}
 
 
 # --- Smoke tests (real file I/O + inference) ---
@@ -84,6 +111,8 @@ def test_fit_smoke_h5ad(h5ad_path, tmp_path):
     config = json.loads((out / "run_config.json").read_text())
     assert config["z_dim"] == 2
     assert config["seed"] == 0
+    assert config["preprocessing_steps"] == ["standardize"]
+    assert config["preprocessing_order"] == "standardize"
 
 
 def test_fit_smoke_with_covariates(h5ad_path, tmp_path):
@@ -98,15 +127,20 @@ def test_fit_smoke_with_covariates(h5ad_path, tmp_path):
         "--tau", "50",
         "--guide-key", "perturbation",
         "--covariates", "batch",
-        "--categoricals", "batch",
+        "--categorical-covariates", "batch",
         "--max-iter", "3",
     ])
     config = json.loads((out / "run_config.json").read_text())
     assert config["covariates"] == ["batch"]
-    assert config["categoricals"] == ["batch"]
+    assert config["categorical_covariates"] == ["batch"]
+    assert config["preprocessing_steps"] == ["residualize", "standardize"]
+    assert config["preprocessing_order"] == "residualize_then_standardize"
+    summary = json.loads((out / "input_summary.json").read_text())
+    assert summary["source"]["residualized"] is True
+    assert summary["source"]["residualized_covariate_names"] == ["batch"]
 
 
-def test_analyze_smoke(h5ad_path, tmp_path):
+def test_analyze_smoke_without_and_with_lfsr(h5ad_path, tmp_path):
     from perturbvi.cli import main
 
     fit_out = tmp_path / "fit_results"
@@ -126,26 +160,82 @@ def test_analyze_smoke(h5ad_path, tmp_path):
     names = [f.name for f in csvs]
     assert "pip_df.csv" in names
     assert "lfsr.csv" not in names
+    pip_table = pd.read_csv(analyze_out / "pip_df.csv", index_col=0)
+    assert list(pip_table.index) == [f"gene_{index}" for index in range(8)]
 
-
-def test_analyze_smoke_with_lfsr(h5ad_path, tmp_path):
-    from perturbvi.cli import main
-
-    fit_out = tmp_path / "fit_results"
-    main([
-        "fit", str(h5ad_path),
-        "--output", str(fit_out),
-        "--z-dim", "2", "--l-dim", "5", "--tau", "50",
-        "--guide-key", "perturbation",
-        "--max-iter", "3",
-    ])
-
-    analyze_out = tmp_path / "analysis_lfsr"
+    lfsr_out = tmp_path / "analysis_lfsr"
     main([
         "analyze", str(fit_out),
-        "--output", str(analyze_out),
+        "--output", str(lfsr_out),
         "--compute-lfsr",
         "--lfsr-iters", "50",
     ])
 
-    assert (analyze_out / "lfsr.csv").exists()
+    assert (lfsr_out / "lfsr.csv").exists()
+
+
+def test_fit_smoke_10x_h5(tmp_path):
+    from perturbvi.cli import main
+
+    input_path = write_10x_h5(tmp_path / "screen.h5")
+    metadata_path = tmp_path / "metadata.csv"
+    pd.DataFrame(
+        {"target": ["control", "target_a", "target_b", "target_a", "target_b", "control"]},
+        index=[f"cell_{index}" for index in range(6)],
+    ).to_csv(metadata_path)
+    output = tmp_path / "tenx_results"
+    main(
+        [
+            "fit",
+            str(input_path),
+            "--format",
+            "10x-h5",
+            "--metadata",
+            str(metadata_path),
+            "--guide-key",
+            "target",
+            "--control-label",
+            "control",
+            "--output",
+            str(output),
+            "--z-dim",
+            "1",
+            "--l-dim",
+            "1",
+            "--tau",
+            "5",
+            "--max-iter",
+            "1",
+        ]
+    )
+
+    assert (output / "params_file.pkl").is_file()
+    assert (output / "gene_names.txt").read_text().splitlines() == ["gene_1", "gene_2", "gene_3"]
+    assert (output / "perturbation_names.txt").read_text().splitlines() == ["target_a", "target_b"]
+
+
+def test_fit_smoke_csv(tmp_path):
+    from perturbvi.cli import main
+
+    cells = [f"c{index}" for index in range(8)]
+    expression_path = tmp_path / "expression.csv"
+    guide_path = tmp_path / "guides.csv"
+    pd.DataFrame(
+        np.arange(24, dtype=float).reshape(8, 3),
+        index=cells,
+        columns=["g1", "g2", "g3"],
+    ).to_csv(expression_path)
+    pd.DataFrame(
+        [[1, 0], [1, 0], [0, 1], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]],
+        index=cells,
+        columns=["p1", "p2"],
+    ).to_csv(guide_path)
+
+    output = tmp_path / "csv_results"
+    main([
+        "fit", str(expression_path), "--guide-matrix", str(guide_path),
+        "--output", str(output), "--z-dim", "1", "--l-dim", "1", "--tau", "5",
+        "--max-iter", "1",
+    ])
+    assert (output / "params_file.pkl").is_file()
+    assert json.loads((output / "run_config.json").read_text())["format"] == "csv"

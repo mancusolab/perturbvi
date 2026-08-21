@@ -1,6 +1,7 @@
 import logging
 import pickle
 
+from pathlib import Path
 from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -20,34 +21,66 @@ log.setLevel(logging.INFO)
 __all__ = ["save_results", "load_results"]
 
 
-# save all results as a pickle object
-def save_results(results: InferResults, path: str):
-    """Create a function to save SuSiE PCA results returned by function
-    perturbvi.infer
+def _validated_names(names, expected: int, label: str):
+    if names is None:
+        return None
+    names = list(names)
+    if len(names) != expected:
+        raise ValueError(f"{label} has {len(names)} entries; expected {expected}")
+    if np.asarray(pd.isna(names), dtype=bool).any():
+        raise ValueError(f"{label} contains missing values")
+    values = [str(name) for name in names]
+    if len(set(values)) != len(values):
+        raise ValueError(f"{label} contains duplicate names")
+    if any("\n" in value or "\r" in value for value in values):
+        raise ValueError(f"{label} may not contain newline characters")
+    return values
 
-    Args:
-        results: results object returned by perturbvi.infer
-        path: local path to save the results subject
+
+def _write_names(path: Path, values, label: str) -> None:
+    (path / f"{label}.txt").write_text("\n".join(values) + "\n", encoding="utf-8")
 
 
+def save_results(
+    results: InferResults,
+    path: str,
+    *,
+    gene_names=None,
+    perturbation_names=None,
+) -> None:
+    """Persist a fit using stable filenames and optional name metadata.
+
+    The directory is created when needed. ``W.txt``, ``pip.txt``, ``pve.txt``,
+    and ``params_file.pkl`` retain their historical names. Optional labels are
+    written to ``gene_names.txt`` and ``perturbation_names.txt`` for automatic
+    saved-results analysis.
     """
-    log.info("Save results from SuSiE PCA")
+    gene_names = _validated_names(gene_names, results.W.shape[1], "gene_names")
+    perturbation_names = _validated_names(
+        perturbation_names,
+        results.params.mean_beta.shape[0],
+        "perturbation_names",
+    )
+    output = Path(path)
+    output.mkdir(parents=True, exist_ok=True)
+    log.info("Saving PerturbVI results")
 
-    np.savetxt(f"{path}/W.txt", results.W)
-    np.savetxt(f"{path}/pip.txt", results.pip)
-    np.savetxt(f"{path}/pve.txt", results.pve)
+    np.savetxt(output / "W.txt", np.asarray(results.W))
+    np.savetxt(output / "pip.txt", np.asarray(results.pip))
+    np.savetxt(output / "pve.txt", np.asarray(results.pve))
+    with (output / "params_file.pkl").open("wb") as params_file:
+        pickle.dump(results.params, params_file)
 
-    params_file = open(f"{path}/params_file.pkl", "wb")
-    pickle.dump(results.params, params_file)
-    params_file.close()
+    if gene_names is not None:
+        _write_names(output, gene_names, "gene_names")
+    if perturbation_names is not None:
+        _write_names(output, perturbation_names, "perturbation_names")
 
-    log.info(f"Results saved successfully at {path}")
-
-    return
+    log.info(f"Results saved successfully at {output}")
 
 
 def load_results(path: str) -> InferResults:
-    """Load saved perturbVI results from a results directory.
+    """Load saved PerturbVI results from a results directory.
 
     Args:
         path: directory written by save_results (must contain params_file.pkl, pip.txt, pve.txt)
@@ -55,65 +88,23 @@ def load_results(path: str) -> InferResults:
     Returns:
         InferResults with params, pve, pip populated. elbo is None (not persisted).
     """
-    with open(f"{path}/params_file.pkl", "rb") as f:
+    result_path = Path(path)
+    with (result_path / "params_file.pkl").open("rb") as f:
         params = pickle.load(f)
 
-    pip = np.loadtxt(f"{path}/pip.txt")
-    pve = np.loadtxt(f"{path}/pve.txt")
+    expected_w_shape = tuple(int(size) for size in params.W.shape)
+    z_dim, gene_count = expected_w_shape
+
+    W = np.asarray(np.loadtxt(result_path / "W.txt")).reshape(expected_w_shape)
+    pip = np.asarray(np.loadtxt(result_path / "pip.txt")).reshape((z_dim, gene_count))
+    pve = np.asarray(np.loadtxt(result_path / "pve.txt")).reshape((z_dim,))
+    if not np.allclose(W, np.asarray(params.W), rtol=1e-5, atol=1e-7):
+        raise ValueError("W.txt does not match the W stored in params_file.pkl")
+    for name, values in {"W.txt": W, "pip.txt": pip, "pve.txt": pve}.items():
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"{name} contains non-finite values")
 
     return InferResults(params=params, elbo=None, pve=pve, pip=pip)
-
-
-# # function to find genes with high pip
-# def find_top_genes(
-#     results: InferResults, pip_cutoff: float = 0.9, gene_symbol: Optional[list] = None, filepath: Optional[str] = None
-# ) -> dict:
-#     """Find genes with high posterior inclusion probabilities (PIPs) and optionally save results.
-
-#     Args:
-#         results: InferResults object containing inference results
-#         pip_cutoff: Threshold for considering a PIP value as significant (default: 0.9)
-#         gene_symbol: Optional list of gene symbols to use as row indices. If None, uses numeric indices
-#         filepath: Optional path to save results. If provided, saves results as CSV with columns:
-#                  'factor', 'gene', 'pip_value'
-
-#     Returns:
-#         dict: Dictionary mapping each factor to list of genes with PIP > cutoff
-#     """
-#     # Create PIP DataFrame
-#     z_dim, p_dim = results.params.W.shape
-#     column_names = [f"w{i}" for i in range(z_dim)]
-
-#     if gene_symbol is not None:
-#         if len(gene_symbol) != p_dim:
-#             raise ValueError(f"Length of gene_symbol ({len(gene_symbol)}) must match number of genes ({p_dim})")
-#         df = pd.DataFrame(results.pip.T, columns=column_names, index=gene_symbol)
-#     else:
-#         df = pd.DataFrame(results.pip.T, columns=column_names)
-
-#     # Initialize an empty dictionary
-#     high_value_genes = {}
-
-#     # Iterate over each column (factor) in the DataFrame
-#     for column in df.columns:
-#         # Find the rows in the current column with values greater than cutoff
-#         high_values_mask = df[column] > pip_cutoff
-#         high_values = df.index[high_values_mask].tolist()
-#         # Store these rows in the dictionary
-#         high_value_genes[column] = high_values
-
-#     # Save to file if filepath is provided
-#     if filepath is not None:
-#         # Create a list to store rows for the DataFrame
-#         rows = []
-#         for factor, genes in high_value_genes.items():
-#             for gene in genes:
-#                 rows.append({"factor": factor, "gene": gene, "pip_value": df.loc[gene, factor]})
-#         # Convert to DataFrame and save
-#         results_df = pd.DataFrame(rows)
-#         results_df.to_csv(filepath, index=False)
-
-#     return high_value_genes
 
 
 def save_pip(results: InferResults, gene_symbol: Optional[list] = None, filepath: Optional[str] = None) -> pd.DataFrame:

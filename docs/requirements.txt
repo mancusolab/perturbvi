@@ -5,7 +5,6 @@ jaxtyping                       # perturbvi uses this, but we also preload for e
 jinja2                          # necessary for mkdocs and mkdocs ecosystem
 mkdocs                          # Main documentation generator.
 mkdocs-material                 # Theme
-mkdocs_include_exclude_files    # Allow for customising which files get included
 mkdocstrings[python]            # Autogenerate documentation from docstrings.
 mknotebooks                     # Turn Jupyter Lab notebooks into webpages.
 pydantic                        # data models

@@ -72,7 +72,7 @@ def generate_sim(
     b_sparsity: float = 0.2,
     effect_size: float = 1.0,
 ) -> SimulatedData:
-    """Create the function to generate a sparse data for perturbVI.
+    """Create the function to generate a sparse data for PerturbVI.
        Please make sure l_dim < p_dim/z_dim
        when generate simulation data using this function.
 
@@ -164,7 +164,7 @@ def generate_sim_with_control(
     b_sparsity: float = 0.2,
     effect_size: float = 1.0,
 ) -> SimulatedData:
-    """Create the function to generate a sparse data for perturbVI.
+    """Create the function to generate a sparse data for PerturbVI.
        Please make sure l_dim < p_dim/z_dim
        when generate simulation data using this function.
 
