@@ -122,9 +122,10 @@ def generate_sim(
 
     # random W
     W = jnp.zeros(shape=(z_dim, p_dim))
+    loading_values = effect_size * random.normal(b_key, shape=(z_dim, l_dim))
 
     for k in range(z_dim):
-        W = W.at[k, (k * l_dim) : ((k + 1) * l_dim)].set(effect_size * random.normal(b_key, shape=(l_dim,)))
+        W = W.at[k, (k * l_dim) : ((k + 1) * l_dim)].set(loading_values[k])
 
     # linear function to generate Z
     # perturbation effects
@@ -189,7 +190,7 @@ def generate_sim_with_control(
         raise ValueError(f"seed should be an interger: received seed = {seed}")
 
     rng_key = random.PRNGKey(seed)
-    rng_key, b_key, beta_key, s_key, var_key, obs_key, beta_key_2 = random.split(rng_key, 7)
+    rng_key, b_key, beta_key, s_key, var_key, obs_key = random.split(rng_key, 6)
 
     # dimension check
     if l_dim > p_dim:
@@ -213,14 +214,24 @@ def generate_sim_with_control(
     if effect_size <= 0:
         raise ValueError(f"effect size should be positive: received effect_size = {effect_size}")
 
-    # control data
+    if not 0 <= control_fraction < 1:
+        raise ValueError(f"control_fraction should be between 0 and 1: received {control_fraction}")
+
+    # Split the requested total sample count into perturbed and control cells.
     control_size = int(n_dim * control_fraction)
+    case_size = n_dim - control_size
+    if case_size < g_dim:
+        raise ValueError(
+            f"Not enough perturbed cells to assign every perturbation: "
+            f"received {case_size} perturbed cells and g_dim = {g_dim}"
+        )
 
     # random W
     W = jnp.zeros(shape=(z_dim, p_dim))
+    loading_values = effect_size * random.normal(b_key, shape=(z_dim, l_dim))
 
     for k in range(z_dim):
-        W = W.at[k, (k * l_dim) : ((k + 1) * l_dim)].set(effect_size * random.normal(b_key, shape=(l_dim,)))
+        W = W.at[k, (k * l_dim) : ((k + 1) * l_dim)].set(loading_values[k])
 
     # linear function to generate Z
     # perturbation effects
@@ -239,17 +250,15 @@ def generate_sim_with_control(
         # Update the selected entries in the column with random values
         beta = beta.at[indices, col].set(random_values)
 
-    # compose new G with control cell
-    G_case = create_design_matrix(s_key, n_dim, g_dim)
-    G_add_zero_col = jnp.insert(G_case, 0, values=0, axis=1)
-    G_control = jnp.hstack((jnp.zeros(shape=(control_size, g_dim)), jnp.ones(shape=(control_size, 1))))
-    G = jnp.vstack((G_add_zero_col, G_control))
-    beta_add = jnp.vstack((beta, 0.5 * random.normal(beta_key_2, shape=(1, z_dim))))
-    # beta_add_zero_row = jnp.insert(beta, beta.shape[0], values=0, axis=0)
+    # Negative-control cells have no perturbation assignment and therefore use
+    # all-zero guide rows. G columns remain aligned one-to-one with beta rows.
+    G_case = create_design_matrix(s_key, case_size, g_dim)
+    G_control = jnp.zeros(shape=(control_size, g_dim))
+    G = jnp.vstack((G_case, G_control))
 
-    Z = G @ beta_add + random.normal(var_key, shape=(n_dim + control_size, z_dim))
+    Z = G @ beta + random.normal(var_key, shape=(n_dim, z_dim))
     # Latent factor model
     m = Z @ W
-    X = m + random.normal(obs_key, shape=(n_dim + control_size, p_dim))
+    X = m + random.normal(obs_key, shape=(n_dim, p_dim))
 
-    return SimulatedData(Z, W, X, G, beta_add)
+    return SimulatedData(Z, W, X, G, beta)

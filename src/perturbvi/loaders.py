@@ -88,14 +88,14 @@ def _extract_covariates(frame: pd.DataFrame, keys: Sequence[str], *, label: str)
     keys = list(keys)
     if not keys:
         raise ValueError("covariates must contain at least one column name")
-    missing_columns = [key for key in keys if key not in frame.columns]
-    if missing_columns:
+    missing = [key for key in keys if key not in frame.columns]
+    if missing:
         if label == "adata.obs":
             raise ValueError(
-                f"covariates not found in adata.obs: {missing_columns}. Available: {list(frame.columns)}"
+                f"covariates not found in adata.obs: {missing}. Available: {list(frame.columns)}"
             )
         raise ValueError(
-            f"Covariate columns not found in {label}: {missing_columns}. Available: {list(frame.columns)}"
+            f"Covariate columns not found in {label}: {missing}. Available: {list(frame.columns)}"
         )
     subset = frame[keys]
     if subset.isna().to_numpy().any():
@@ -170,12 +170,12 @@ def _screen_from_anndata(
 ) -> ScreenData:
     obs = adata.obs if obs is None else obs
     if layer == "X":
-        expression = adata.X
+        expr = adata.X
     elif layer in adata.layers:
-        expression = adata.layers[layer]
+        expr = adata.layers[layer]
     else:
         raise ValueError(f"Layer '{layer}' not found in AnnData. Available layers: {list(adata.layers.keys())}")
-    X = _to_internal_matrix(expression)
+    X = _to_internal_matrix(expr)
 
     if (guide_key is None) == (guide_obsm is None):
         raise ValueError("Provide exactly one of guide_key or guide_obsm for AnnData input")
@@ -209,9 +209,9 @@ def _screen_from_anndata(
             perturbations = [perturbations[index] for index in keep]
         G = _to_internal_matrix(obsm_value)
 
-    covariate_values = None
+    covar_data = None
     if covariates is not None:
-        covariate_values = _extract_covariates(obs, covariates, label="adata.obs")
+        covar_data = _extract_covariates(obs, covariates, label="adata.obs")
 
     screen = ScreenData(
         X=X,
@@ -230,7 +230,7 @@ def _screen_from_anndata(
             "n_obs": int(adata.n_obs),
             "n_vars": int(adata.n_vars),
         },
-        covariates=covariate_values,
+        covariates=covar_data,
         covariate_names=list(covariates) if covariates is not None else None,
     )
     validate_screen(screen)
@@ -249,7 +249,7 @@ def _load_h5ad(path: Path, **kwargs) -> ScreenData:
 
 
 def _metadata_10x_assignment(
-    expression_data,
+    expr,
     *,
     metadata_path: str,
     guide_key: str,
@@ -257,19 +257,19 @@ def _metadata_10x_assignment(
     missing_guide: str,
     covariates: Optional[Sequence[str]],
 ):
-    metadata = _select_external_metadata(metadata_path, expression_data.obs_names.astype(str))
+    metadata = _select_external_metadata(metadata_path, expr.obs_names.astype(str))
     if guide_key not in metadata.columns:
         raise ValueError(f"guide_key '{guide_key}' not found in metadata columns: {list(metadata.columns)}")
-    expression_data = expression_data[metadata.index]
-    guide_matrix, perturbations = _guides_from_labels(
+    expr = expr[metadata.index]
+    guides, perturbations = _guides_from_labels(
         metadata[guide_key],
         control_label=control_label,
         missing_guide=missing_guide,
     )
-    covariate_values = (
+    covar_data = (
         _extract_covariates(metadata, covariates, label="metadata file") if covariates is not None else None
     )
-    return expression_data, guide_matrix, perturbations, covariate_values
+    return expr, guides, perturbations, covar_data
 
 
 def _load_10x(
@@ -292,16 +292,16 @@ def _load_10x(
             "H5AD before loading them with PerturbVI."
         )
     feature_types = adata.var["feature_types"]
-    expression_mask = feature_types == expression_feature_type
+    expr_mask = feature_types == expression_feature_type
     available_types = feature_types.unique().tolist()
-    if not expression_mask.any():
+    if not expr_mask.any():
         raise ValueError(
             f"No features with feature_type='{expression_feature_type}' found. Available types: {available_types}"
         )
-    expression_data = adata[:, expression_mask]
-    input_cells = int(adata.n_obs)
-    expression_data, guide_matrix, perturbations, covariate_values = _metadata_10x_assignment(
-        expression_data,
+    expr = adata[:, expr_mask]
+    n_input = int(adata.n_obs)
+    expr, guides, perturbations, covar_data = _metadata_10x_assignment(
+        expr,
         metadata_path=metadata_path,
         guide_key=guide_key,
         control_label=control_label,
@@ -310,11 +310,11 @@ def _load_10x(
     )
 
     screen = ScreenData(
-        X=_to_internal_matrix(expression_data.X),
-        G=_to_internal_matrix(guide_matrix),
-        gene_names=list(expression_data.var_names.astype(str)),
+        X=_to_internal_matrix(expr.X),
+        G=_to_internal_matrix(guides),
+        gene_names=list(expr.var_names.astype(str)),
         perturbation_names=perturbations,
-        cell_names=list(expression_data.obs_names.astype(str)),
+        cell_names=list(expr.obs_names.astype(str)),
         source={
             "path": source_path,
             "format": source_format,
@@ -325,12 +325,12 @@ def _load_10x(
             "guide_key": guide_key,
             "control_label": control_label,
             "missing_guide": missing_guide,
-            "n_input_obs": input_cells,
-            "n_obs": int(expression_data.n_obs),
-            "n_exp_vars": int(expression_mask.sum()),
+            "n_input_obs": n_input,
+            "n_obs": int(expr.n_obs),
+            "n_exp_vars": int(expr_mask.sum()),
             "n_total_vars": int(adata.n_vars),
         },
-        covariates=covariate_values,
+        covariates=covar_data,
         covariate_names=list(covariates) if covariates is not None else None,
     )
     validate_screen(screen)
@@ -455,11 +455,11 @@ def _load_delimited(
             missing_guide=missing_guide,
         )
 
-    covariate_values = None
+    covar_data = None
     if covariates is not None:
         if metadata is None:
             raise ValueError("metadata_path is required when covariates are requested for delimited input")
-        covariate_values = _extract_covariates(metadata, covariates, label="metadata file")
+        covar_data = _extract_covariates(metadata, covariates, label="metadata file")
 
     screen = ScreenData(
         X=X,
@@ -478,7 +478,7 @@ def _load_delimited(
             "header": header,
             "index_col": index_col,
         },
-        covariates=covariate_values,
+        covariates=covar_data,
         covariate_names=list(covariates) if covariates is not None else None,
     )
     validate_screen(screen)

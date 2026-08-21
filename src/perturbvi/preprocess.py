@@ -16,8 +16,8 @@ def _build_design_matrix(
     """Build an intercept plus centered numeric and reference-coded categorical columns."""
     covariates = np.asarray(covariates)
     names = list(covariate_names)
-    categorical_names = list(categorical_covariates or [])
-    categorical_set = set(categorical_names)
+    cat_names = list(categorical_covariates or [])
+    cat_set = set(cat_names)
 
     if covariates.ndim != 2:
         raise ValueError(f"covariates must be 2D; got shape {covariates.shape}")
@@ -25,7 +25,7 @@ def _build_design_matrix(
         raise ValueError(
             f"covariate_names has {len(names)} entries but covariates has {covariates.shape[1]} columns"
         )
-    unknown = [name for name in categorical_names if name not in names]
+    unknown = [name for name in cat_names if name not in names]
     if unknown:
         raise ValueError(f"categorical_covariates {unknown} not found in covariate_names: {names}")
     if np.asarray(pd.isna(covariates), dtype=bool).any():
@@ -34,7 +34,7 @@ def _build_design_matrix(
     columns = [np.ones((covariates.shape[0], 1), dtype=np.float64)]
     for index, name in enumerate(names):
         column = covariates[:, index]
-        if name in categorical_set:
+        if name in cat_set:
             levels = list(pd.unique(column))
             for level in levels[1:]:
                 columns.append((column == level).astype(np.float64).reshape(-1, 1))
@@ -93,37 +93,37 @@ def residualize_screen(
     if screen.covariate_names is None:
         raise ValueError("screen.covariate_names is required for residualization")
 
-    available_names = list(screen.covariate_names)
-    selected_names = list(covariates) if covariates is not None else available_names
-    if not selected_names:
+    all_names = list(screen.covariate_names)
+    selected = list(covariates) if covariates is not None else all_names
+    if not selected:
         raise ValueError("At least one covariate must be selected for residualization")
-    unknown = [name for name in selected_names if name not in available_names]
+    unknown = [name for name in selected if name not in all_names]
     if unknown:
-        raise ValueError(f"covariates {unknown} not found in covariate_names: {available_names}")
+        raise ValueError(f"covariates {unknown} not found in covariate_names: {all_names}")
 
-    categorical_names = list(categorical_covariates or [])
-    unknown_categorical = [name for name in categorical_names if name not in available_names]
-    if unknown_categorical:
+    cat_names = list(categorical_covariates or [])
+    unknown_cat = [name for name in cat_names if name not in all_names]
+    if unknown_cat:
         raise ValueError(
-            f"categorical_covariates {unknown_categorical} not found in covariate_names: {available_names}"
+            f"categorical_covariates {unknown_cat} not found in covariate_names: {all_names}"
         )
-    outside_selection = [name for name in categorical_names if name not in selected_names]
-    if outside_selection:
+    unselected_cat = [name for name in cat_names if name not in selected]
+    if unselected_cat:
         raise ValueError(
-            f"categorical_covariates {outside_selection} are not selected covariates: {selected_names}"
+            f"categorical_covariates {unselected_cat} are not selected covariates: {selected}"
         )
 
-    selected_indices = [available_names.index(name) for name in selected_names]
-    selected_values = np.asarray(screen.covariates)[:, selected_indices]
+    selected_idx = [all_names.index(name) for name in selected]
+    selected_values = np.asarray(screen.covariates)[:, selected_idx]
     design = _build_design_matrix(
         selected_values,
-        selected_names,
-        categorical_covariates=categorical_names,
+        selected,
+        categorical_covariates=cat_names,
     )
     if np.linalg.matrix_rank(design) <= 1:
         raise ValueError("Covariate design must contain at least one non-intercept direction")
 
-    X_residualized = _least_squares_residualize(
+    X_resid = _least_squares_residualize(
         matrix_to_numpy(screen.X, dtype=np.float64),
         design,
     )
@@ -131,19 +131,17 @@ def residualize_screen(
     source.update(
         {
             "residualized": True,
-            "residualized_covariate_names": selected_names,
-            "residualized_categorical_covariates": categorical_names,
+            "residualized_covariate_names": selected,
+            "residualized_categorical_covariates": cat_names,
             "residualization_method": "rank-aware least squares",
         }
     )
-    remaining_indices = [index for index, name in enumerate(available_names) if name not in selected_names]
-    remaining_covariates = (
-        np.asarray(screen.covariates)[:, remaining_indices] if remaining_indices else None
-    )
-    remaining_names = [available_names[index] for index in remaining_indices] or None
+    keep_idx = [index for index, name in enumerate(all_names) if name not in selected]
+    kept_covars = np.asarray(screen.covariates)[:, keep_idx] if keep_idx else None
+    kept_names = [all_names[index] for index in keep_idx] or None
     return screen._replace(
-        X=X_residualized,
-        covariates=remaining_covariates,
-        covariate_names=remaining_names,
+        X=X_resid,
+        covariates=kept_covars,
+        covariate_names=kept_names,
         source=source,
     )

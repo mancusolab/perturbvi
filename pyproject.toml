@@ -69,7 +69,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.test.scripts]
-run-coverage = "pytest --cov-config=pyproject.toml --cov=pkg --cov=tests"
+run-coverage = "pytest --cov-config=pyproject.toml --cov=perturbvi --cov=tests"
 run = "run-coverage --no-cov"
 
 [[tool.hatch.envs.all.matrix]]
@@ -84,7 +84,7 @@ dependencies = [
 ]
 
 [tool.ruff]
-target-version = "py37"
+target-version = "py39"
 line-length = 120
 
 [tool.ruff.lint]
@@ -105,7 +105,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["susieguy"]
+known-first-party = ["perturbvi"]
 combine-as-imports = true
 lines-after-imports = 2
 lines-between-types = 1
@@ -124,7 +124,7 @@ jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "optimistix", "optax"]
 [tool.pyright]
 reportIncompatibleMethodOverride = true
 reportIncompatibleVariableOverride = false  # Incompatible with eqx.AbstractVar
-include = ["perturbvi", "tests"]
+include = ["src/perturbvi", "tests"]
 exclude = ["docs"]
 
 [tool.coverage.run]
@@ -132,11 +132,11 @@ source_pkgs = ["perturbvi", "tests"]
 branch = true
 parallel = true
 omit = [
-    "src/susieguy/__about__.py",
+    "src/perturbvi/_version.py",
 ]
 
 [tool.coverage.paths]
-susieguy = ["src/perturbvi", "*/perturbvi/src/perturbvi"]
+perturbvi = ["src/perturbvi", "*/perturbvi/src/perturbvi"]
 tests = ["tests", "*/perturbvi/tests"]
 
 [tool.coverage.report]

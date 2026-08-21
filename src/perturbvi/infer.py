@@ -340,6 +340,8 @@ def _check_args(
 
     if isinstance(X, sparse.JAXSparse):
         X = _normalize_sparse_matrix(X, "X")
+        if not jnp.issubdtype(X.dtype, jnp.inexact):
+            X = X.astype(jnp.result_type(X.dtype, jnp.float32))
     else:
         try:
             X = jnp.asarray(X)

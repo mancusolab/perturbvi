@@ -113,6 +113,30 @@ def test_infer_accepts_bcsr_through_sparse_layout_boundary():
     assert results.pip.shape == (1, X.shape[1])
 
 
+@pytest.mark.parametrize("sparse_type", [jax_sparse.BCOO, jax_sparse.BCSR])
+@pytest.mark.parametrize("standardize", [False, True])
+def test_infer_accepts_integer_sparse_expression(sparse_type, standardize):
+    X, G = _inputs()
+    integer_X = sparse_type.fromdense(X.astype(np.int32))
+    centered = X - X.mean(axis=0)
+    expected_x_ssq = X.size if standardize else np.sum(centered**2)
+
+    results = infer(
+        integer_X,
+        1,
+        1,
+        G,
+        tau=2.0,
+        standardize=standardize,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+
+    np.testing.assert_allclose(results.params.x_ssq, expected_x_ssq, rtol=1e-5)
+    assert np.isfinite(np.asarray(results.pip)).all()
+
+
 def test_infer_sparse_default_pca_initialization_remains_supported():
     X, G = _inputs()
     results = infer(

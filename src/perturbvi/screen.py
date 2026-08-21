@@ -114,8 +114,8 @@ def _validate_names(names: Optional[Sequence[str]], expected: int, label: str) -
         raise ValueError(f"{label} has {len(values)} entries but the corresponding matrix dimension is {expected}")
     if np.asarray(pd.isna(values), dtype=bool).any():
         raise ValueError(f"{label} contains missing values")
-    as_strings = [str(value) for value in values]
-    if len(set(as_strings)) != len(as_strings):
+    labels = [str(value) for value in values]
+    if len(set(labels)) != len(labels):
         raise ValueError(f"{label} contains duplicate names")
 
 
@@ -166,18 +166,18 @@ def validate_screen(screen: ScreenData) -> None:
             raise ValueError("covariate_names requires covariates")
         return
 
-    covariates = np.asarray(screen.covariates)
-    if covariates.ndim != 2:
-        raise ValueError(f"covariates must be 2D; got shape {covariates.shape}")
-    if covariates.shape[0] != x_shape[0]:
-        raise ValueError(f"covariates must have {x_shape[0]} rows (cells); got {covariates.shape[0]}")
-    if covariates.shape[1] == 0:
+    covars = np.asarray(screen.covariates)
+    if covars.ndim != 2:
+        raise ValueError(f"covariates must be 2D; got shape {covars.shape}")
+    if covars.shape[0] != x_shape[0]:
+        raise ValueError(f"covariates must have {x_shape[0]} rows (cells); got {covars.shape[0]}")
+    if covars.shape[1] == 0:
         raise ValueError("covariates must contain at least one column")
-    if np.asarray(pd.isna(covariates), dtype=bool).any():
+    if np.asarray(pd.isna(covars), dtype=bool).any():
         raise ValueError("covariates contains missing values")
-    if np.issubdtype(covariates.dtype, np.number) and not np.all(np.isfinite(covariates)):
+    if np.issubdtype(covars.dtype, np.number) and not np.all(np.isfinite(covars)):
         raise ValueError("covariates contains non-finite values")
-    _validate_names(screen.covariate_names, covariates.shape[1], "covariate_names")
+    _validate_names(screen.covariate_names, covars.shape[1], "covariate_names")
 
 
 def fit_screen(
