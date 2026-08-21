@@ -23,7 +23,7 @@ def test_analyze_lfsr_none_by_default(small_results):
     results, _ = small_results
     tables = analyze(results)
     assert tables["lfsr"] is None
-    assert {"pip_df", "pve_df", "overall_effect_df"} <= set(tables)
+    assert {"pip", "pve", "overall_effect"} <= set(tables)
 
 
 def test_analyze_compute_lfsr(small_results):
@@ -41,21 +41,20 @@ def test_analyze_with_names(small_results):
         gene_names=gene_names,
         perturbation_names=perturbation_names,
     )
-    assert list(tables["pip_df"].index) == gene_names
-    assert list(tables["overall_effect_df"].columns) == perturbation_names
+    assert list(tables["pip"].index) == gene_names
+    assert list(tables["overall_effect"].columns) == perturbation_names
 
 
 def test_analysis_thresholds_drive_summary_tables(small_results):
     results, _ = small_results
     pip_threshold = 0.5
-    rho_prime = 0.2
-    tables = analyze(results, pip_threshold=pip_threshold, rho_prime=rho_prime)
-    assert len(tables["pip_significant_df"]) == int(
+    tables = analyze(results, pip_threshold=pip_threshold)
+    assert len(tables["pip_significant"]) == int(
         (np.asarray(results.pip) >= pip_threshold).sum()
     )
     np.testing.assert_array_equal(
-        tables["pip_summary_df"]["n_low_pip"],
-        (np.asarray(results.pip) <= rho_prime).sum(axis=1),
+        tables["pip_summary"]["n_pip_significant"],
+        (np.asarray(results.pip) >= pip_threshold).sum(axis=1),
     )
 
 
@@ -64,7 +63,6 @@ def test_analysis_thresholds_drive_summary_tables(small_results):
     [
         ({"pip_threshold": "high"}, "pip_threshold"),
         ({"lfsr_threshold": np.nan}, "lfsr_threshold"),
-        ({"rho_prime": True}, "rho_prime"),
         ({"lfsr_iters": False}, "lfsr_iters"),
         ({"seed": True}, "seed"),
     ],
@@ -97,7 +95,7 @@ def test_analyze_forwards_lfsr_seed_and_iterations(small_results, monkeypatch):
     assert called["iters"] == 17
     assert not np.array_equal(called["key"], np.array([0, 0], dtype=np.uint32))
     assert tables["lfsr"].shape == (15, 4)
-    assert len(tables["lfsr_significant_df"]) == 15 * 4
+    assert len(tables["lfsr_significant"]) == 15 * 4
 
 
 def test_saved_analysis_uses_saved_names_and_cached_lfsr(tmp_path):
@@ -125,8 +123,8 @@ def test_saved_analysis_uses_saved_names_and_cached_lfsr(tmp_path):
     loaded = load_results(str(output))
     assert loaded.pip.shape == (1, 5)
     tables = analyze(str(output))
-    assert list(tables["pip_df"].index) == gene_names
-    assert list(tables["beta_df"].index) == perturbation_names
+    assert list(tables["pip"].index) == gene_names
+    assert list(tables["beta"].index) == perturbation_names
     assert tables["lfsr"].shape == (5, 2)
 
 

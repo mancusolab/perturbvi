@@ -126,10 +126,10 @@ Every saved fit contains `W.txt`, `pip.txt`, `pve.txt`, and
 `perturbation_names.txt`; CLI fits add `run_config.json` and
 `input_summary.json`.
 
-By default, `perturbvi analyze` writes `pip_df.csv`, `pve_df.csv`,
-`beta_df.csv`, `p_hat_df.csv`, `overall_effect_df.csv`,
-`pip_significant_df.csv`, and `pip_summary_df.csv`. With `--compute-lfsr`, it
-also writes `lfsr.csv` and `lfsr_significant_df.csv`.
+By default, `perturbvi analyze` writes `pip.csv`, `pve.csv`, `beta.csv`,
+`p_hat.csv`, `overall_effect.csv`, `pip_significant.csv`, and
+`pip_summary.csv`. With `--compute-lfsr`, it also writes `lfsr.csv` and
+`lfsr_significant.csv`.
 
 See the [output reference](docs/api.md#saved-files) for details.
 

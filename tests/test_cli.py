@@ -158,9 +158,9 @@ def test_analyze_smoke_without_and_with_lfsr(h5ad_path, tmp_path):
     csvs = list(analyze_out.glob("*.csv"))
     assert len(csvs) > 0
     names = [f.name for f in csvs]
-    assert "pip_df.csv" in names
+    assert "pip.csv" in names
     assert "lfsr.csv" not in names
-    pip_table = pd.read_csv(analyze_out / "pip_df.csv", index_col=0)
+    pip_table = pd.read_csv(analyze_out / "pip.csv", index_col=0)
     assert list(pip_table.index) == [f"gene_{index}" for index in range(8)]
 
     lfsr_out = tmp_path / "analysis_lfsr"

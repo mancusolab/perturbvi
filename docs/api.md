@@ -51,16 +51,16 @@ output directory is supplied:
 
 | File | Contents |
 |---|---|
-| `pip_df.csv` | Gene-by-factor PIP table |
-| `pve_df.csv` | Per-factor PVE table |
-| `beta_df.csv` | Sparse perturbation-by-factor effects |
-| `p_hat_df.csv` | Perturbation-factor posterior probabilities |
-| `overall_effect_df.csv` | Gene-by-perturbation effects |
-| `pip_significant_df.csv` | Genes meeting the PIP threshold |
-| `pip_summary_df.csv` | Per-factor PIP and PVE summary |
+| `pip.csv` | Gene-by-factor PIP table |
+| `pve.csv` | Per-factor PVE table |
+| `beta.csv` | Sparse perturbation-by-factor effects |
+| `p_hat.csv` | Perturbation-factor posterior probabilities |
+| `overall_effect.csv` | Gene-by-perturbation effects |
+| `pip_significant.csv` | Genes meeting the PIP threshold |
+| `pip_summary.csv` | Per-factor PIP and PVE summary |
 
 With `--compute-lfsr`, analysis also writes `lfsr.csv` and
-`lfsr_significant_df.csv`. LFSR is not computed by default.
+`lfsr_significant.csv`. LFSR is not computed by default.
 
 ## Array interface
 

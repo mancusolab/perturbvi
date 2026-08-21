@@ -90,7 +90,7 @@ def _attach_lfsr(
             for gene in selected
         )
     tables["lfsr"] = lfsr_df
-    tables["lfsr_significant_df"] = pd.DataFrame(rows, columns=["perturbation", "gene", "lfsr"])
+    tables["lfsr_significant"] = pd.DataFrame(rows, columns=["perturbation", "gene", "lfsr"])
 
 
 def _analyze_result(
@@ -100,7 +100,6 @@ def _analyze_result(
     perturbation_names: Optional[Sequence[str]] = None,
     pip_threshold: float = 0.9,
     lfsr_threshold: float = 0.05,
-    rho_prime: float = 0.1,
     compute_lfsr: bool = False,
     lfsr_iters: int = 2000,
     seed: int = 0,
@@ -111,9 +110,8 @@ def _analyze_result(
         results: An :class:`InferResults` returned by ``infer`` or ``fit_screen``.
         gene_names: Optional labels for expression features.
         perturbation_names: Optional labels for guide features.
-        pip_threshold: Inclusive threshold used by ``pip_significant_df``.
-        lfsr_threshold: Inclusive threshold used by ``lfsr_significant_df``.
-        rho_prime: Upper bound counted as low PIP in ``pip_summary_df``.
+        pip_threshold: Inclusive threshold used by ``pip_significant``.
+        lfsr_threshold: Inclusive threshold used by ``lfsr_significant``.
         compute_lfsr: Explicitly run the expensive Monte Carlo LFSR step.
         lfsr_iters: Positive number of Monte Carlo iterations.
         seed: Integer random seed passed to LFSR computation.
@@ -125,7 +123,6 @@ def _analyze_result(
     """
     _validate_threshold(pip_threshold, "pip_threshold")
     _validate_threshold(lfsr_threshold, "lfsr_threshold")
-    _validate_threshold(rho_prime, "rho_prime")
     if isinstance(lfsr_iters, bool) or not isinstance(lfsr_iters, numbers.Integral) or lfsr_iters <= 0:
         raise ValueError(f"lfsr_iters must be a positive integer; received {lfsr_iters}")
     if isinstance(seed, bool) or not isinstance(seed, numbers.Integral):
@@ -149,20 +146,19 @@ def _analyze_result(
             "factor": factor_names,
             "pve": pve,
             "n_pip_significant": (pip >= pip_threshold).sum(axis=1),
-            "n_low_pip": (pip <= rho_prime).sum(axis=1),
         }
     )
 
     tables = {
-        "pip_df": pip_df,
-        "pve_df": pd.DataFrame({"factor": factor_names, "pve": pve}),
-        "beta_df": beta_df,
-        "p_hat_df": p_hat_df,
-        "overall_effect_df": overall_effect_df,
-        "pip_significant_df": _pip_significant_table(pip_df, pip_threshold),
-        "pip_summary_df": pip_summary_df,
+        "pip": pip_df,
+        "pve": pd.DataFrame({"factor": factor_names, "pve": pve}),
+        "beta": beta_df,
+        "p_hat": p_hat_df,
+        "overall_effect": overall_effect_df,
+        "pip_significant": _pip_significant_table(pip_df, pip_threshold),
+        "pip_summary": pip_summary_df,
         "lfsr": None,
-        "lfsr_significant_df": None,
+        "lfsr_significant": None,
     }
     if compute_lfsr:
         lfsr_df = _compute_lfsr(
@@ -218,8 +214,8 @@ def _analyze_saved_result(
 
     if not kwargs.get("compute_lfsr", False) and (result_path / "lfsr.csv").is_file():
         cached = pd.read_csv(result_path / "lfsr.csv", index_col=0)
-        genes = list(tables["pip_df"].index)
-        perturbations = list(tables["beta_df"].index)
+        genes = list(tables["pip"].index)
+        perturbations = list(tables["beta"].index)
         _attach_lfsr(
             tables,
             cached,
@@ -237,7 +233,6 @@ def analyze(
     perturbation_names: Optional[Sequence[str]] = None,
     pip_threshold: float = 0.9,
     lfsr_threshold: float = 0.05,
-    rho_prime: float = 0.1,
     compute_lfsr: bool = False,
     lfsr_iters: int = 2000,
     seed: int = 0,
@@ -254,7 +249,6 @@ def analyze(
             perturbation_names=perturbation_names,
             pip_threshold=pip_threshold,
             lfsr_threshold=lfsr_threshold,
-            rho_prime=rho_prime,
             compute_lfsr=compute_lfsr,
             lfsr_iters=lfsr_iters,
             seed=seed,
@@ -266,7 +260,6 @@ def analyze(
         perturbation_names=perturbation_names,
         pip_threshold=pip_threshold,
         lfsr_threshold=lfsr_threshold,
-        rho_prime=rho_prime,
         compute_lfsr=compute_lfsr,
         lfsr_iters=lfsr_iters,
         seed=seed,

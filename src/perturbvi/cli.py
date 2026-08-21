@@ -133,7 +133,6 @@ def _add_analyze_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output", default=None, help="Output directory (default: <results_dir>/analysis)")
     parser.add_argument("--pip-threshold", type=float, default=0.9)
     parser.add_argument("--lfsr-threshold", type=float, default=0.05)
-    parser.add_argument("--rho-prime", type=float, default=0.1)
     parser.add_argument("--compute-lfsr", action="store_true", default=False)
     parser.add_argument("--lfsr-iters", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)
@@ -270,7 +269,6 @@ def _cmd_analyze(args, log) -> None:
         perturbation_names=perturbation_names,
         pip_threshold=args.pip_threshold,
         lfsr_threshold=args.lfsr_threshold,
-        rho_prime=args.rho_prime,
         compute_lfsr=args.compute_lfsr,
         lfsr_iters=args.lfsr_iters,
         seed=args.seed,
