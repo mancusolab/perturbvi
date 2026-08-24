@@ -4,8 +4,7 @@
 
 # PerturbVI
 
-PerturbVI finds gene programs and estimates how perturbations affect them in
-single-cell screens.
+Perturbvi is a scalable approach to infer regulatory modules through informative latent component model in the single-cell Perturb-seq data.
 
 ## Install
 
@@ -91,11 +90,16 @@ data = residualize_screen(data)  # optional
 fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
 ```
 
-`X` and `G` are required and must list the same cells in the same row order.
-Read CSV/TSV with pandas first, then pass the DataFrames. `fit_screen()`
-centers expression; pass `standardize=True` to also scale each gene to unit
-variance. `control=` names the reference column to drop from `G`; omit it when
-`G` is already baseline-free.
+`X` and `G` are both required, and their rows must refer to the same cells in
+the same order. Read CSV/TSV files with pandas first, then pass the resulting
+DataFrames so gene and perturbation names stay aligned.
+
+`fit_screen()` always centers each gene across cells. If your expression is
+not already scaled, pass `standardize=True` to also divide each gene by its
+standard deviation, giving every gene unit variance.
+
+`control=` names a reference column in `G` to drop (for example
+`"Nontargeting"`). Omit it when `G` is already baseline-free.
 
 See the [Workflow](https://mancusolab.github.io/perturbvi/workflow/)
 for complete input and analysis guidance and the
