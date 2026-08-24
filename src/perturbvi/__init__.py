@@ -1,6 +1,5 @@
 from importlib.metadata import PackageNotFoundError, version  # pragma: no cover
 
-from .analysis import analyze as analyze
 from .infer import (
     compute_elbo as compute_elbo,
     compute_pip as compute_pip,
@@ -10,14 +9,14 @@ from .infer import (
 from .io import load_results as load_results, save_results as save_results
 from .loaders import load_screen as load_screen
 from .preprocess import residualize_screen as residualize_screen
-from .screen import fit_screen as fit_screen, ScreenData as ScreenData
+from .screen import fit_screen as fit_screen, FitResults as FitResults, PerturbData as PerturbData
 from .sim import generate_sim as generate_sim
 
 
 __all__ = (
-    "ScreenData",
+    "FitResults",
+    "PerturbData",
     "__version__",
-    "analyze",
     "compute_elbo",
     "compute_pip",
     "compute_pve",

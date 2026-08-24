@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # pattern: Functional Core
-import logging
 import math
 import numbers
 
@@ -17,6 +16,17 @@ from jax import nn, numpy as jnp, random
 from jax.experimental import sparse
 from jaxtyping import Array, ArrayLike
 
+from ._defaults import (
+    DEFAULT_INIT,
+    DEFAULT_LEARNING_RATE,
+    DEFAULT_MAX_ITER,
+    DEFAULT_P_PRIOR,
+    DEFAULT_SEED,
+    DEFAULT_STANDARDIZE,
+    DEFAULT_TAU,
+    DEFAULT_TOL,
+    DEFAULT_VERBOSE,
+)
 from .annotation import AnnotationPriorModel, FixedPrior, PriorModel
 from .common import (
     DataMatrix,
@@ -25,13 +35,13 @@ from .common import (
 )
 from .factorloadings import FactorModel, LoadingModel
 from .guide import DenseGuideModel, GuideModel, SparseGuideModel
-from .log import get_logger
+from .log import get_logger, set_verbose
 from .sparse import CenteredSparseMatrix, sparse_column_variance, SparseMatrix
 from .utils import prob_pca
 
 
-log = get_logger("perturbvi")
-log.setLevel(logging.INFO)
+log = get_logger(__name__)
+vlog = get_logger("perturbvi.verbose")
 
 _init_type = Literal["pca", "random"]
 
@@ -136,7 +146,7 @@ def compute_elbo(
     # or just ignore it
     exp_logl = (-0.5 * params.tau) * (
         params.x_ssq
-        - 2 * jnp.sum(mean_w * (X.T @ mean_z).T)
+        - 2 * jnp.sum(mean_w * (X.T @ mean_z).T)  # tr(E[W] @ X.T @ E[Z])
         + jnp.einsum("ij,ji->", mean_zz, mean_ww)  # tr(E[Z.T @ Z] @ E[W @ W.T])
     ) + 0.5 * n_dim * p_dim * jnp.log(params.tau)
 
@@ -195,27 +205,23 @@ def _init_params(
     X: DataMatrix,
     guide: GuideModel,
     annotations: PriorModel,
-    p_prior: Optional[float] = 0.1,
-    tau: float = 1.0,
+    p_prior: Optional[float] = DEFAULT_P_PRIOR,
+    tau: float = DEFAULT_TAU,
     init: _init_type = "pca",
-    verbose: bool = True,
 ) -> ModelParams:
-    if verbose:
-        log.info("Starting model parameter initialization...")
+    log.info("Starting model parameter initialization...")
 
     # Base parameters
     n_dim, p_dim = X.shape
     tau_0 = jnp.ones((l_dim, z_dim))
     tau_0.block_until_ready()
-    if verbose:
-        log.info("✓ Base parameters initialized (5%)")
+    vlog.info("✓ Base parameters initialized (5%)")
 
     # Random keys
     keys = random.split(rng_key, 8)
     keys[0].block_until_ready()
     svd_key, mu_key, var_key, muw_key, varw_key, beta_key, var_beta_key, theta_key = keys
-    if verbose:
-        log.info("✓ Random keys setup (10%)")
+    vlog.info("✓ Random keys setup (10%)")
 
     # Data statistics
     if isinstance(X, CenteredSparseMatrix):
@@ -225,8 +231,7 @@ def _init_params(
     else:
         x_ssq = jnp.sum(X * X)
     x_ssq.block_until_ready()
-    if verbose:
-        log.info("✓ Data statistics computed (15%)")
+    vlog.info("✓ Data statistics computed (15%)")
 
     # Factors
     if init == "pca":
@@ -234,27 +239,22 @@ def _init_params(
     else:
         init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
     init_mu_z.block_until_ready()
-    if verbose:
-        log.info("✓ Factors initialized (35%)")
+    vlog.info("✓ Factors initialized (35%)")
 
     # Factor variance
     init_var_z = jnp.diag(random.normal(var_key, shape=(z_dim,)) ** 2)
     init_var_z.block_until_ready()
-    if verbose:
-        log.info("✓ Factor variance set (45%)")
+    vlog.info("✓ Factor variance set (45%)")
 
     # Loadings
     init_mu_w = random.normal(muw_key, shape=(l_dim, z_dim, p_dim)) * 1e-3
     init_var_w = (1 / tau_0) * (random.normal(varw_key, shape=(l_dim, z_dim))) ** 2
     init_mu_w.block_until_ready()
     init_var_w.block_until_ready()
-    if verbose:
-        log.info("✓ Loadings initialized (60%)")
+    vlog.info("✓ Loadings initialized (60%)")
 
     # Alpha and pi
     init_alpha = jnp.full((l_dim, z_dim, p_dim), 1.0 / p_dim)
-    if verbose:
-        log.info("Avoid dirichlet process")
     init_alpha.block_until_ready()
     if isinstance(annotations, AnnotationPriorModel):
         p_dim, m = annotations.shape
@@ -266,8 +266,7 @@ def _init_params(
         theta = None
         pi = jnp.ones(shape=(z_dim, p_dim)) / p_dim
         pi.block_until_ready()
-    if verbose:
-        log.info("✓ Annotations setup complete (75%)")
+    vlog.info("✓ Annotations setup complete (75%)")
 
     # Perturbation effects
     _, g_dim = guide.shape
@@ -287,18 +286,14 @@ def _init_params(
     tau_beta.block_until_ready()
     init_mu_beta.block_until_ready()
     init_var_beta.block_until_ready()
-    if verbose:
-        log.info("✓ Perturbation effects initialized (90%)")
+    vlog.info("✓ Perturbation effects initialized (90%)")
 
     # Priors
     if p_prior is not None:
         p_prior.block_until_ready()
     p_hat.block_until_ready()
-    if verbose:
-        log.info("✓ Priors setup complete (100%)")
-
-    if verbose:
-        log.info("✓ Model parameter initialization completed successfully")
+    vlog.info("✓ Priors setup complete (100%)")
+    log.info("✓ Model parameter initialization completed successfully")
 
     return ModelParams(
         x_ssq,
@@ -462,7 +457,7 @@ def _check_control_args(
 
 
 class InferResults(NamedTuple):
-    """Results returned by :func:`infer` and :func:`perturbvi.fit_screen`.
+    """Unlabeled array-level results returned by :func:`infer`.
 
     Attributes:
         params: Inferred model parameters.
@@ -484,33 +479,33 @@ class InferResults(NamedTuple):
 
 def infer(
     X: ArrayLike | sparse.JAXSparse,
+    G: ArrayLike | sparse.JAXSparse,
+    *,
     z_dim: int,
     l_dim: int,
-    G: ArrayLike | sparse.JAXSparse,
+    tau: float = DEFAULT_TAU,
     A: Optional[ArrayLike | sparse.JAXSparse] = None,
-    p_prior: Optional[float] = 0.1,
-    tau: float = 1.0,
-    standardize: bool = False,
-    init: _init_type = "pca",
-    learning_rate: float = 1e-2,
-    max_iter: int = 400,
-    tol: float = 1e-3,
-    seed: int = 0,
-    verbose: bool = True,
+    p_prior: Optional[float] = DEFAULT_P_PRIOR,
+    standardize: bool = DEFAULT_STANDARDIZE,
+    init: Literal["random", "pca"] = DEFAULT_INIT,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    max_iter: int = DEFAULT_MAX_ITER,
+    tol: float = DEFAULT_TOL,
+    seed: int = DEFAULT_SEED,
+    verbose: bool = DEFAULT_VERBOSE,
 ) -> InferResults:
     """Fit PerturbVI from preprocessed array inputs.
 
     Args:
         X: Cell-by-gene expression matrix. Dense array-like and JAX sparse
             matrices are supported.
+        G: Cell-by-perturbation guide design matrix.
         z_dim: Number of latent factors.
         l_dim: Number of single effects per factor.
-        G: Cell-by-perturbation guide design matrix. The positional argument
-            remains part of the stable low-level contract.
+        tau: Positive initial residual precision.
         A: Optional gene-by-annotation matrix for parameterized loading priors.
         p_prior: Prior inclusion probability for perturbation effects. ``None``
             or zero selects deterministic dense guide regression.
-        tau: Positive initial residual precision.
         standardize: Scale each expression column to unit population variance
             after centering. Centering is always applied. Constant columns are
             rejected when scaling is enabled.
@@ -528,6 +523,9 @@ def infer(
         ValueError: If dimensions, values, guide columns, or scalar controls are
             invalid. Validation occurs before the iterative fit begins.
     """
+
+    # Route progress logging: identical behavior for the CLI and Python API.
+    set_verbose(verbose)
 
     # Validate cheap scalar controls before copying or transferring matrices.
     _check_control_args(
@@ -588,7 +586,6 @@ def infer(
         p_prior,
         tau,
         init,
-        verbose,
     )
     params = annotation.init_state(params)
 
@@ -598,15 +595,13 @@ def infer(
     for idx in range(1, max_iter + 1):
         elbo_res, params = _inner_loop(X, guide, factors, loadings, annotation, params)
 
-        if verbose:
-            log.info(f"Iter [{idx}] | {elbo_res}")
+        vlog.info(f"Iter [{idx}] | {elbo_res}")
 
         diff = elbo_res.elbo - elbo
-        if diff < 0 and verbose:
-            log.info(f"Alert! Diff between elbo[{idx - 1}] and elbo[{idx}] = {diff}")
+        if diff < 0:
+            vlog.info(f"Alert! Diff between elbo[{idx - 1}] and elbo[{idx}] = {diff}")
         if jnp.fabs(diff) < tol:
-            if verbose:
-                log.info(f"Elbo diff tolerance reached at iteration {idx}")
+            log.info(f"Elbo diff tolerance reached at iteration {idx}")
             break
 
         elbo = elbo_res.elbo

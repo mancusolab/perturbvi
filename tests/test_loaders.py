@@ -7,250 +7,224 @@ from scipy import sparse as scipy_sparse
 
 from jax.experimental import sparse as jax_sparse
 
+from perturbvi import load_screen
+
 
 @pytest.fixture
-def h5ad_path(tmp_path):
+def adata():
     rng = np.random.default_rng(0)
-    n, g = 30, 10
-    X = rng.poisson(5, (n, g)).astype(float)
+    n_cells, n_genes = 48, 20
+    expression = rng.normal(size=(n_cells, n_genes))
+    conditions = np.resize(["control", "IRF1", "STAT1", "CEBPA"], n_cells)
     obs = pd.DataFrame(
         {
-            "perturbation": rng.choice(["geneA", "geneB", "non-targeting"], n),
-            "batch": rng.choice(["A", "B"], n),
-            "n_counts": X.sum(axis=1),
+            "condition": conditions,
+            "batch": np.resize(["run_1", "run_2"], n_cells),
+            "depth": rng.uniform(1_000, 20_000, n_cells),
+            "guide_A": np.resize([0, 1, 0, 1], n_cells),
+            "guide_B": np.resize([0, 0, 1, 1], n_cells),
         },
-        index=[f"cell_{i}" for i in range(n)],
+        index=[f"cell_{index}" for index in range(n_cells)],
     )
-    var = pd.DataFrame(index=[f"gene_{i}" for i in range(g)])
-    adata = ad.AnnData(X=X, obs=obs, var=var)
-    adata.layers["counts"] = X * 2
+    result = ad.AnnData(
+        X=expression,
+        obs=obs,
+        var=pd.DataFrame(index=[f"gene_{index}" for index in range(n_genes)]),
+    )
+    result.layers["transformed"] = expression * 2
+    result.obsm["G"] = obs["condition"].astype("string").str.get_dummies().astype(int)
+    return result
+
+
+@pytest.mark.parametrize("storage", ["object", "h5ad", "zarr"])
+def test_key_driven_load_has_the_same_behavior_across_anndata_storage(adata, tmp_path, storage):
+    source = adata
+    if storage == "h5ad":
+        source = tmp_path / "screen.h5ad"
+        adata.write_h5ad(source)
+    elif storage == "zarr":
+        source = tmp_path / "screen.zarr"
+        adata.write_zarr(source)
+
+    data = load_screen(source, control="control")
+
+    assert data.X.shape == adata.shape
+    assert data.G.shape == (adata.n_obs, 3)
+    assert data.gene_names == tuple(adata.var_names)
+    assert data.perturbation_names == ("CEBPA", "IRF1", "STAT1")
+    control_rows = adata.obs["condition"].eq("control").to_numpy()
+    np.testing.assert_array_equal(np.asarray(data.G)[control_rows], 0)
+
+
+def test_baseline_free_g_passes_through_without_control(adata):
+    G = pd.DataFrame(
+        {
+            "guide_A": adata.obs["guide_A"].astype(int),
+            "guide_B": adata.obs["guide_B"].astype(int),
+        },
+        index=adata.obs_names,
+    )
+    adata.obsm["G"] = G
+
+    data = load_screen(adata)
+
+    assert data.perturbation_names == ("guide_A", "guide_B")
+    np.testing.assert_array_equal(np.asarray(data.G)[0], [0, 0])
+    np.testing.assert_array_equal(np.asarray(data.G)[3], [1, 1])
+
+
+def test_control_column_is_dropped_before_fitting(adata):
+    data = load_screen(adata, control="control")
+
+    assert "control" not in data.perturbation_names
+    assert data.perturbation_names == ("CEBPA", "IRF1", "STAT1")
+
+
+def test_missing_control_column_raises(adata):
+    with pytest.raises(ValueError, match="not present"):
+        load_screen(adata, control="missing")
+
+
+def test_control_none_passes_stored_frame_through_unchanged(adata):
+    # control=None declares G baseline-free; the loader trusts that claim and
+    # cannot guess that "control" is the reference.
+    data = load_screen(adata)
+    assert "control" in data.perturbation_names
+
+
+def test_perturbation_names_preserve_stored_column_order(adata):
+    # Deliberately non-alphabetical order: names must label the exact columns
+    # of the stored binary matrix, in the same order.
+    G = pd.DataFrame(
+        {
+            "z_target": np.resize([0, 1, 0], adata.n_obs),
+            "a_target": np.resize([1, 0, 0], adata.n_obs),
+            "m_target": np.resize([0, 0, 1], adata.n_obs),
+        },
+        index=adata.obs_names,
+    )
+    adata.obsm["G"] = G
+
+    data = load_screen(adata)
+
+    assert data.perturbation_names == ("z_target", "a_target", "m_target")
+    stored = G.to_numpy(dtype=np.float64)
+    np.testing.assert_array_equal(np.asarray(data.G), stored)
+    # Each name corresponds to the matching column of the stored matrix.
+    for index, name in enumerate(data.perturbation_names):
+        np.testing.assert_array_equal(np.asarray(data.G)[:, index], stored[:, index])
+
+
+def test_obsm_entry_must_be_a_named_dataframe(adata):
+    adata.obsm["G"] = np.zeros((adata.n_obs, 2))
+    with pytest.raises(ValueError, match="named pandas DataFrame"):
+        load_screen(adata)
+
+
+def test_missing_g_key_raises_with_guidance(adata):
+    del adata.obsm["G"]
+    with pytest.raises(ValueError, match="does not exist"):
+        load_screen(adata)
+
+
+def test_custom_g_key_is_honored(adata):
+    adata.obsm["perturbations"] = adata.obsm["G"].copy()
+    del adata.obsm["G"]
+    data = load_screen(adata, g_key="perturbations", control="control")
+    assert data.perturbation_names == ("CEBPA", "IRF1", "STAT1")
+
+
+def test_named_layer_is_explicit(adata):
+    default = load_screen(adata, control="control")
+    selected = load_screen(adata, control="control", x_key="transformed")
+    np.testing.assert_allclose(np.asarray(selected.X), np.asarray(default.X) * 2)
+
+
+def test_missing_x_key_raises(adata):
+    with pytest.raises(KeyError, match="does not exist"):
+        load_screen(adata, x_key="missing")
+
+
+def test_covariates_keep_values_and_allow_string_categories(adata):
+    data = load_screen(adata, control="control", covariates=["batch", "depth"])
+    pd.testing.assert_frame_equal(data.covariates, adata.obs[["batch", "depth"]])
+
+
+def test_loader_fails_on_missing_covariates(adata):
+    with pytest.raises(KeyError, match="missing"):
+        load_screen(adata, control="control", covariates=["missing"])
+
+
+def test_all_zero_g_column_is_rejected(adata):
+    G = adata.obsm["G"].copy()
+    G["empty"] = 0
+    adata.obsm["G"] = G
+    with pytest.raises(ValueError, match="all-zero"):
+        load_screen(adata)
+
+
+def test_non_binary_g_is_rejected(adata):
+    G = adata.obsm["G"].copy()
+    G.iloc[0, 0] = 2
+    adata.obsm["G"] = G
+    with pytest.raises(ValueError, match="binary"):
+        load_screen(adata)
+
+
+def test_sparse_expression_remains_sparse_at_realistic_screen_dimensions():
+    rng = np.random.default_rng(8)
+    n_cells, n_genes, n_perturbations = 2_000, 5_000, 64
+    expression = scipy_sparse.random(
+        n_cells,
+        n_genes,
+        density=0.002,
+        random_state=rng,
+        format="csr",
+    )
+    assignments = np.arange(n_cells) % n_perturbations
+    obs = pd.DataFrame(
+        {"condition": ["control" if index % 9 == 0 else f"target_{assignments[index]}" for index in range(n_cells)]},
+        index=[f"cell_{index}" for index in range(n_cells)],
+    )
+    adata = ad.AnnData(
+        X=expression,
+        obs=obs,
+        var=pd.DataFrame(index=[f"gene_{index}" for index in range(n_genes)]),
+    )
+    adata.obsm["G"] = obs["condition"].astype("string").str.get_dummies().astype(int)
+
+    data = load_screen(adata, control="control")
+
+    assert isinstance(data.X, jax_sparse.JAXSparse)
+    assert data.X.shape == (n_cells, n_genes)
+    assert data.G.shape[0] == n_cells
+    assert len(data.perturbation_names) == n_perturbations
+
+
+def test_obsm_g_dataframe_round_trips_through_h5ad(tmp_path):
+    rng = np.random.default_rng(3)
+    cells = [f"cell_{index}" for index in range(12)]
+    adata = ad.AnnData(
+        X=rng.normal(size=(12, 5)),
+        obs=pd.DataFrame({"condition": ["control", "a", "b"] * 4}, index=cells),
+        var=pd.DataFrame(index=[f"gene_{index}" for index in range(5)]),
+    )
+    adata.obsm["G"] = (
+        adata.obs["condition"].astype("string").str.get_dummies().astype(int)
+    )
     path = tmp_path / "screen.h5ad"
     adata.write_h5ad(path)
-    return path
 
+    default = load_screen(path, control="control")
+    custom = load_screen(path, g_key="G", control="control")
 
-def test_load_h5ad_guide_key(h5ad_path):
-    from perturbvi import load_screen
+    assert default.perturbation_names == ("a", "b")
+    assert default.perturbation_names == custom.perturbation_names
+    np.testing.assert_allclose(np.asarray(default.G), np.asarray(custom.G))
 
-    screen = load_screen(str(h5ad_path), guide_key="perturbation", control_label="non-targeting")
-    assert screen.X.shape[0] == 30
-    assert screen.X.shape[1] == 10
-    assert screen.G.shape[0] == 30
-    assert screen.gene_names is not None
-    assert screen.cell_names is not None
-    assert screen.perturbation_names is not None
 
-
-def test_load_anndata_object(h5ad_path):
-    from perturbvi import load_screen
-
-    adata = ad.read_h5ad(h5ad_path)
-    screen = load_screen(
-        adata,
-        format="anndata",
-        guide_key="perturbation",
-        control_label="non-targeting",
-        covariates=["batch", "n_counts"],
-    )
-    assert screen.X.shape == adata.shape
-    assert screen.cell_names == adata.obs_names.astype(str).tolist()
-    assert screen.source["format"] == "anndata"
-    assert screen.source["path"] is None
-
-
-def test_load_anndata_object_rejects_file_format(h5ad_path):
-    from perturbvi import load_screen
-
-    adata = ad.read_h5ad(h5ad_path)
-    with pytest.raises(ValueError, match="incompatible"):
-        load_screen(adata, format="csv", guide_key="perturbation")
-
-
-def test_load_h5ad_control_label_dropped(h5ad_path):
-    from perturbvi import load_screen
-
-    screen = load_screen(str(h5ad_path), guide_key="perturbation", control_label="non-targeting")
-    assert "non-targeting" not in screen.perturbation_names
-
-
-def test_load_h5ad_requires_control_label_for_categorical_assignments(h5ad_path):
-    from perturbvi import load_screen
-
-    with pytest.raises(ValueError, match="control_label is required"):
-        load_screen(str(h5ad_path), guide_key="perturbation")
-
-
-def test_load_h5ad_named_layer(h5ad_path):
-    from perturbvi import load_screen
-
-    screen = load_screen(
-        str(h5ad_path), guide_key="perturbation", control_label="non-targeting", layer="counts"
-    )
-    # counts layer was X * 2, so values should differ from X layer
-    screen_x = load_screen(str(h5ad_path), guide_key="perturbation", control_label="non-targeting", layer="X")
-    assert not np.allclose(screen.X, screen_x.X)
-
-
-def test_load_h5ad_missing_layer(h5ad_path):
-    from perturbvi import load_screen
-
-    with pytest.raises(ValueError, match="Layer 'bad_layer' not found"):
-        load_screen(
-            str(h5ad_path), guide_key="perturbation", control_label="non-targeting", layer="bad_layer"
-        )
-
-
-def test_load_h5ad_missing_guide_key(h5ad_path):
-    from perturbvi import load_screen
-
-    with pytest.raises(ValueError, match="guide_key 'does_not_exist' not found"):
-        load_screen(str(h5ad_path), guide_key="does_not_exist")
-
-
-def test_load_h5ad_guide_obsm(h5ad_path):
-    import scanpy as sc
-
-    from perturbvi import load_screen
-
-    adata = sc.read_h5ad(h5ad_path)
-    rng = np.random.default_rng(1)
-    G = (rng.random((adata.n_obs, 3)) > 0.5).astype(float)
-    adata.obsm["guide_matrix"] = G
-    adata.write_h5ad(h5ad_path)
-
-    screen = load_screen(str(h5ad_path), guide_obsm="guide_matrix")
-    assert screen.G.shape == (adata.n_obs, 3)
-
-
-def test_load_h5ad_rejects_mismatched_guide_obsm(h5ad_path, monkeypatch):
-    import scanpy as sc
-
-    from perturbvi import load_screen
-
-    adata = sc.read_h5ad(h5ad_path)
-
-    class FakeAnnData:
-        X = adata.X
-        obs = adata.obs
-        var_names = adata.var_names
-        obs_names = adata.obs_names
-        layers = adata.layers
-        obsm = {"bad_guides": np.ones((adata.n_obs - 1, 2))}
-        n_obs = adata.n_obs
-        n_vars = adata.n_vars
-
-    monkeypatch.setattr(sc, "read_h5ad", lambda path: FakeAnnData())
-    with pytest.raises(ValueError, match="same number of rows"):
-        load_screen(str(h5ad_path), guide_obsm="bad_guides")
-
-
-def test_load_h5ad_missing_guide_obsm(h5ad_path):
-    from perturbvi import load_screen
-
-    with pytest.raises(ValueError, match="guide_obsm 'missing' not found"):
-        load_screen(str(h5ad_path), guide_obsm="missing")
-
-
-def test_load_h5ad_covariates(h5ad_path):
-    from perturbvi import load_screen
-
-    screen = load_screen(
-        str(h5ad_path),
-        guide_key="perturbation",
-        control_label="non-targeting",
-        covariates=["batch", "n_counts"],
-    )
-    assert screen.covariates is not None
-    assert screen.covariates.shape == (30, 2)
-    assert screen.covariate_names == ["batch", "n_counts"]
-
-
-def test_load_h5ad_missing_covariate(h5ad_path):
-    from perturbvi import load_screen
-
-    with pytest.raises(ValueError, match="covariates not found in adata.obs"):
-        load_screen(
-            str(h5ad_path),
-            guide_key="perturbation",
-            control_label="non-targeting",
-            covariates=["does_not_exist"],
-        )
-
-
-def test_load_h5ad_auto_format(h5ad_path):
-    from perturbvi import load_screen
-
-    # auto format should detect .h5ad extension
-    screen = load_screen(
-        str(h5ad_path), guide_key="perturbation", control_label="non-targeting", format="auto"
-    )
-    assert screen.X.shape[1] == 10
-
-
-def test_load_h5ad_metadata_path_raises(h5ad_path):
-    from perturbvi import load_screen
-
-    with pytest.raises(ValueError, match="metadata_path is not supported for h5ad"):
-        load_screen(
-            str(h5ad_path),
-            guide_key="perturbation",
-            control_label="non-targeting",
-            metadata_path="some_file.csv",
-        )
-
-
-def test_load_h5ad_rejects_missing_guide_labels(tmp_path):
-    from perturbvi import load_screen
-
-    adata = ad.AnnData(
-        X=np.ones((3, 2)),
-        obs=pd.DataFrame({"guide": ["g1", None, "g2"]}, index=["c1", "c2", "c3"]),
-        var=pd.DataFrame(index=["x", "y"]),
-    )
-    path = tmp_path / "missing.h5ad"
-    adata.write_h5ad(path)
-
-    with pytest.raises(ValueError, match="Perturbation labels are missing"):
-        load_screen(str(path), guide_key="guide", control_label="g1")
-
-    screen = load_screen(str(path), guide_key="guide", control_label="g1", missing_guide="unassigned")
-    np.testing.assert_array_equal(np.asarray(screen.G)[1], np.zeros(1))
-
-
-def test_load_h5ad_rejects_missing_categorical_covariate(tmp_path):
-    from perturbvi import load_screen
-
-    adata = ad.AnnData(
-        X=np.ones((3, 2)),
-        obs=pd.DataFrame(
-            {"guide": ["g1", "g1", "g2"], "batch": ["A", None, "B"]},
-            index=["c1", "c2", "c3"],
-        ),
-        var=pd.DataFrame(index=["x", "y"]),
-    )
-    path = tmp_path / "missing_covariate.h5ad"
-    adata.write_h5ad(path)
-
-    with pytest.raises(ValueError, match="missing values"):
-        load_screen(str(path), guide_key="guide", control_label="g1", covariates=["batch"])
-
-
-def test_load_h5ad_rejects_unknown_control_label(h5ad_path):
-    from perturbvi import load_screen
-
-    with pytest.raises(ValueError, match="control_label"):
-        load_screen(str(h5ad_path), guide_key="perturbation", control_label="typo")
-
-
-def test_load_h5ad_preserves_sparse_expression(tmp_path):
-    from perturbvi import load_screen
-
-    adata = ad.AnnData(
-        X=scipy_sparse.csr_matrix(np.eye(4)),
-        obs=pd.DataFrame({"guide": ["g1", "g1", "g2", "g2"]}, index=[f"c{i}" for i in range(4)]),
-        var=pd.DataFrame(index=[f"x{i}" for i in range(4)]),
-    )
-    path = tmp_path / "sparse.h5ad"
-    adata.write_h5ad(path)
-    screen = load_screen(str(path), guide_key="guide", control_label="g1")
-    assert isinstance(screen.X, jax_sparse.JAXSparse)
+def test_non_anndata_paths_are_not_implicitly_guessed(tmp_path):
+    path = tmp_path / "expression.csv"
+    path.write_text("cell,gene\nc1,1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Expected an AnnData"):
+        load_screen(path)

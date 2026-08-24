@@ -2,48 +2,50 @@ from __future__ import annotations
 
 import logging
 
-from pathlib import Path
+
+LOG_FORMAT = "[%(asctime)s - %(levelname)s] %(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+# Extra per-iteration detail lives on this child logger. Its records are
+# ordinary INFO lines; set_verbose() decides whether they are emitted.
+CHATTER_LOGGER = "perturbvi.verbose"
 
 
-_LOG_FORMAT = "[%(asctime)s - %(levelname)s] %(message)s"
-_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+def _has_real_handler(logger: logging.Logger) -> bool:
+    """True if any usable handler exists on this logger or its ancestors."""
+    node = logger
+    while node:
+        if any(not isinstance(h, logging.NullHandler) for h in node.handlers):
+            return True
+        if not node.propagate:
+            return False
+        node = node.parent
+    return False
 
 
-def _formatter() -> logging.Formatter:
-    return logging.Formatter(fmt=_LOG_FORMAT, datefmt=_DATE_FORMAT)
+def get_logger(name: str) -> logging.Logger:
+    """Return a logger, guaranteeing timestamped output when unconfigured.
 
-
-def _log_path(path: str | Path) -> Path:
-    return Path(f"{path}.log").resolve()
-
-
-def get_logger(name: str, path: str | Path | None = None, level: int = logging.INFO) -> logging.Logger:
-    """Return a configured PerturbVI logger, optionally writing to a file."""
+    Attaches the standard console handler to the package logger only when no
+    application-provided handler is found. Applications with their own logging
+    configuration are left untouched.
+    """
     logger = logging.getLogger(name)
-    logger.setLevel(level)
-    logger.propagate = False
-
-    has_console = any(
-        isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler)
-        for handler in logger.handlers
-    )
-    if not has_console:
+    package = logging.getLogger("perturbvi")
+    if not _has_real_handler(package):
         console = logging.StreamHandler()
-        console.setFormatter(_formatter())
-        logger.addHandler(console)
-
-    if path is not None:
-        requested_path = _log_path(path)
-        file_handlers = [handler for handler in logger.handlers if isinstance(handler, logging.FileHandler)]
-        if not any(Path(handler.baseFilename) == requested_path for handler in file_handlers):
-            for handler in file_handlers:
-                if getattr(handler, "_perturbvi_file_handler", False):
-                    logger.removeHandler(handler)
-                    handler.close()
-
-            disk_handler = logging.FileHandler(requested_path, mode="w", encoding="utf-8")
-            disk_handler._perturbvi_file_handler = True
-            disk_handler.setFormatter(_formatter())
-            logger.addHandler(disk_handler)
-
+        console.setFormatter(logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
+        package.addHandler(console)
+        if package.level == logging.NOTSET:
+            package.setLevel(logging.INFO)
+        package.propagate = False
     return logger
+
+
+def set_verbose(enabled: bool) -> None:
+    """Route library logging identically for the CLI and Python API.
+
+    ``False`` (default) keeps milestone progress visible as INFO. ``True``
+    additionally emits the per-iteration ELBO detail — also labeled INFO.
+    """
+    logging.getLogger(CHATTER_LOGGER).setLevel(logging.INFO if enabled else logging.WARNING)

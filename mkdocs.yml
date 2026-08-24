@@ -112,6 +112,8 @@ plugins:
 nav:
     - Docs:
         - Home: 'index.md'
+        - Workflow: 'workflow.md'
+        - Input structure: 'input_structure.md'
         - Cookbook: 'cookbook.md'
         - API: 'api.md'
     - Misc:

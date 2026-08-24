@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections import namedtuple
-from typing import Any, Mapping, Optional, Sequence, TYPE_CHECKING, Union
+from dataclasses import dataclass
+from typing import Literal, Optional, Sequence, TYPE_CHECKING, Union
 
 import numpy as np
 import pandas as pd
@@ -11,68 +11,93 @@ from scipy import sparse as scipy_sparse
 from jax.experimental import sparse as jax_sparse
 from jaxtyping import ArrayLike
 
-
-if TYPE_CHECKING:
-    from .infer import InferResults
-
-
-_ScreenDataTuple = namedtuple(
-    "_ScreenDataTuple",
-    [
-        "X",
-        "G",
-        "gene_names",
-        "perturbation_names",
-        "cell_names",
-        "source",
-        "covariates",
-        "covariate_names",
-    ],
+from ._defaults import (
+    DEFAULT_INIT,
+    DEFAULT_LEARNING_RATE,
+    DEFAULT_MAX_ITER,
+    DEFAULT_P_PRIOR,
+    DEFAULT_SEED,
+    DEFAULT_STANDARDIZE,
+    DEFAULT_TAU,
+    DEFAULT_TOL,
+    DEFAULT_VERBOSE,
 )
 
 
-class ScreenData(_ScreenDataTuple):
-    """Validated in-memory inputs for a PerturbVI fit.
+if TYPE_CHECKING:
+    from .infer import ELBOResults, InferResults, ModelParams
 
-    The container uses canonical ``gene_names`` and ``perturbation_names``
-    fields, never retains a raw AnnData object, and keeps tuple behavior such
-    as ``_replace``.
-    """
+
+@dataclass(frozen=True)
+class PerturbData:
+    """Expression, perturbation design, labels, and optional covariates."""
 
     X: ArrayLike
     G: ArrayLike
-    gene_names: Optional[Sequence[str]]
-    perturbation_names: Optional[Sequence[str]]
-    cell_names: Optional[Sequence[str]]
-    source: Mapping[str, Any]
-    covariates: Optional[ArrayLike]
-    covariate_names: Optional[Sequence[str]]
-    __slots__ = ()
+    gene_names: Optional[Sequence[str]] = None
+    perturbation_names: Optional[Sequence[str]] = None
+    covariates: Optional[pd.DataFrame] = None
 
-    def __new__(
-        cls,
-        X: ArrayLike,
-        G: ArrayLike,
-        gene_names: Optional[Sequence[str]] = None,
-        perturbation_names: Optional[Sequence[str]] = None,
-        cell_names: Optional[Sequence[str]] = None,
-        source: Optional[Mapping[str, Any]] = None,
-        covariates: Optional[ArrayLike] = None,
-        covariate_names: Optional[Sequence[str]] = None,
-    ) -> "ScreenData":
-        if source is None:
-            source = {}
-        return super().__new__(
-            cls,
-            X,
-            G,
-            gene_names,
-            perturbation_names,
-            cell_names,
-            source,
-            covariates,
-            covariate_names,
-        )
+    def __post_init__(self) -> None:
+        """Infer DataFrame labels and check row order when indexes are available."""
+        row_index = None
+        if isinstance(self.X, pd.DataFrame):
+            row_index = self.X.index
+            if self.gene_names is None:
+                object.__setattr__(self, "gene_names", tuple(str(name) for name in self.X.columns))
+        if isinstance(self.G, pd.DataFrame):
+            if row_index is not None and not row_index.equals(self.G.index):
+                raise ValueError("X and G DataFrames must have identical row indexes in the same order")
+            row_index = self.G.index if row_index is None else row_index
+            if self.perturbation_names is None:
+                object.__setattr__(
+                    self,
+                    "perturbation_names",
+                    tuple(str(name) for name in self.G.columns),
+                )
+        if (
+            isinstance(self.covariates, pd.DataFrame)
+            and row_index is not None
+            and not row_index.equals(self.covariates.index)
+        ):
+            raise ValueError("covariates must have the same row index and order as X and G")
+        if self.gene_names is not None:
+            object.__setattr__(self, "gene_names", tuple(str(name) for name in self.gene_names))
+        if self.perturbation_names is not None:
+            object.__setattr__(
+                self,
+                "perturbation_names",
+                tuple(str(name) for name in self.perturbation_names),
+            )
+
+
+@dataclass(frozen=True)
+class FitResults:
+    """Labeled result returned by :func:`fit_screen`."""
+
+    inference: "InferResults"
+    gene_names: tuple[str, ...]
+    perturbation_names: tuple[str, ...]
+
+    @property
+    def params(self) -> "ModelParams":
+        return self.inference.params
+
+    @property
+    def elbo(self) -> Optional["ELBOResults"]:
+        return self.inference.elbo
+
+    @property
+    def pve(self):
+        return self.inference.pve
+
+    @property
+    def pip(self):
+        return self.inference.pip
+
+    @property
+    def W(self):
+        return self.inference.W
 
 
 def _shape(value, name: str) -> tuple[int, ...]:
@@ -108,30 +133,21 @@ def _column_sumsq(value, n_columns: int) -> np.ndarray:
 
 def _validate_names(names: Optional[Sequence[str]], expected: int, label: str) -> None:
     if names is None:
-        return
+        raise ValueError(f"{label} is required for the high-level screen API")
     values = list(names)
     if len(values) != expected:
         raise ValueError(f"{label} has {len(values)} entries but the corresponding matrix dimension is {expected}")
     if np.asarray(pd.isna(values), dtype=bool).any():
         raise ValueError(f"{label} contains missing values")
     labels = [str(value) for value in values]
+    if any(not value.strip() for value in labels):
+        raise ValueError(f"{label} contains empty names")
     if len(set(labels)) != len(labels):
         raise ValueError(f"{label} contains duplicate names")
 
 
-def matrix_to_numpy(value, *, dtype=None) -> np.ndarray:
-    """Materialize a supported matrix, used only by explicitly dense operations."""
-    if isinstance(value, jax_sparse.JAXSparse):
-        value = value.todense()
-    elif scipy_sparse.issparse(value):
-        value = value.toarray()
-    return np.asarray(value, dtype=dtype)
-
-
-def validate_screen(screen: ScreenData) -> None:
-    """Validate a screen before any expensive inference or preprocessing."""
-    if not isinstance(screen.source, Mapping):
-        raise ValueError("source must be a mapping")
+def validate_screen(screen: PerturbData) -> None:
+    """Validate an in-memory high-level screen before preprocessing or fitting."""
     x_shape = _shape(screen.X, "X")
     g_shape = _shape(screen.G, "G")
 
@@ -144,14 +160,15 @@ def validate_screen(screen: ScreenData) -> None:
     if g_shape[1] == 0:
         raise ValueError("G must contain at least one perturbation column")
     if x_shape[0] != g_shape[0]:
-        raise ValueError(
-            f"X and G must have the same number of rows (cells); got X: {x_shape[0]}, G: {g_shape[0]}"
-        )
+        raise ValueError(f"X and G must have the same number of rows (cells); got X: {x_shape[0]}, G: {g_shape[0]}")
 
     if not np.all(np.isfinite(_stored_values(screen.X))):
         raise ValueError("X contains non-finite values (nan or inf)")
-    if not np.all(np.isfinite(_stored_values(screen.G))):
+    guide_values = _stored_values(screen.G)
+    if not np.all(np.isfinite(guide_values)):
         raise ValueError("G contains non-finite values (nan or inf)")
+    if not np.isin(guide_values, [0.0, 1.0]).all():
+        raise ValueError("G must contain only binary perturbation assignments")
 
     empty_cols = np.flatnonzero(_column_sumsq(screen.G, g_shape[1]) == 0)
     if empty_cols.size:
@@ -159,79 +176,62 @@ def validate_screen(screen: ScreenData) -> None:
 
     _validate_names(screen.gene_names, x_shape[1], "gene_names")
     _validate_names(screen.perturbation_names, g_shape[1], "perturbation_names")
-    _validate_names(screen.cell_names, x_shape[0], "cell_names")
 
     if screen.covariates is None:
-        if screen.covariate_names is not None:
-            raise ValueError("covariate_names requires covariates")
         return
-
-    covars = np.asarray(screen.covariates)
-    if covars.ndim != 2:
-        raise ValueError(f"covariates must be 2D; got shape {covars.shape}")
-    if covars.shape[0] != x_shape[0]:
-        raise ValueError(f"covariates must have {x_shape[0]} rows (cells); got {covars.shape[0]}")
-    if covars.shape[1] == 0:
+    if not isinstance(screen.covariates, pd.DataFrame):
+        raise ValueError("covariates must be a pandas DataFrame so names and dtypes remain aligned")
+    if screen.covariates.shape[0] != x_shape[0]:
+        raise ValueError(f"covariates must have {x_shape[0]} rows (cells); got {screen.covariates.shape[0]}")
+    if screen.covariates.shape[1] == 0:
         raise ValueError("covariates must contain at least one column")
-    if np.asarray(pd.isna(covars), dtype=bool).any():
-        raise ValueError("covariates contains missing values")
-    if np.issubdtype(covars.dtype, np.number) and not np.all(np.isfinite(covars)):
-        raise ValueError("covariates contains non-finite values")
-    _validate_names(screen.covariate_names, covars.shape[1], "covariate_names")
+    _validate_names(list(screen.covariates.columns), screen.covariates.shape[1], "covariate names")
+    for name in screen.covariates:
+        series = screen.covariates[name]
+        if series.isna().any():
+            raise ValueError(f"Covariate '{name}' contains missing values")
+        if pd.api.types.is_numeric_dtype(series.dtype) and not pd.api.types.is_bool_dtype(series.dtype):
+            if pd.api.types.is_complex_dtype(series.dtype):
+                raise ValueError(f"Covariate '{name}' must not be complex-valued")
+            values = series.to_numpy(dtype=np.float64)
+        else:
+            continue
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"Covariate '{name}' contains non-finite values")
 
 
 def fit_screen(
-    screen: ScreenData,
+    screen: PerturbData,
     *,
     z_dim: int,
     l_dim: int,
-    tau: float,
-    p_prior: float = 0.1,
-    standardize: bool = True,
-    init: str = "random",
-    tol: float = 1e-2,
-    max_iter: int = 500,
-    seed: int = 0,
+    tau: float = DEFAULT_TAU,
+    p_prior: float = DEFAULT_P_PRIOR,
+    standardize: bool = DEFAULT_STANDARDIZE,
+    init: Literal["random", "pca"] = DEFAULT_INIT,
+    tol: float = DEFAULT_TOL,
+    max_iter: int = DEFAULT_MAX_ITER,
+    seed: int = DEFAULT_SEED,
     A: Optional[Union[ArrayLike, jax_sparse.JAXSparse]] = None,
-    learning_rate: float = 1e-2,
-    verbose: bool = False,
-) -> "InferResults":
-    """Fit a validated screen and return :class:`InferResults`.
-
-    Optional residualization must be performed before calling this function.
-    Expression features are always centered before fitting. When
-    ``standardize=True``, centered features are also divided by their
-    population standard deviation.
-
-    Args:
-        screen: Validated expression, perturbation design, and metadata.
-        z_dim: Number of latent factors.
-        l_dim: Number of single effects per factor.
-        tau: Positive initial residual precision.
-        p_prior: Prior inclusion probability for perturbation effects.
-        standardize: Scale centered expression features to unit population
-            variance. Centering is always applied.
-        init: Latent-factor initialization, ``"random"`` or ``"pca"``.
-        tol: Positive absolute convergence tolerance.
-        max_iter: Positive maximum number of inference iterations.
-        seed: Random seed.
-        A: Optional gene-by-annotation matrix for annotation-informed loading
-            priors. Its rows must follow the gene order in ``screen.X``.
-        learning_rate: Positive optimizer learning rate used only when ``A``
-            is provided.
-        verbose: Report inference progress.
-
-    Returns:
-        Fitted parameters, ELBO, PVE, and PIP values.
-    """
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    verbose: bool = DEFAULT_VERBOSE,
+) -> FitResults:
+    """Fit a validated screen, applying any selected covariates once."""
     from .infer import infer
 
-    validate_screen(screen)
-    return infer(
-        screen.X,
+    screen_for_fit = screen
+    if screen_for_fit.covariates is not None:
+        from .preprocess import residualize_screen
+
+        screen_for_fit = residualize_screen(screen_for_fit)
+    else:
+        validate_screen(screen_for_fit)
+
+    inference = infer(
+        screen_for_fit.X,
+        screen_for_fit.G,
         z_dim=z_dim,
         l_dim=l_dim,
-        G=screen.G,
         A=A,
         tau=tau,
         p_prior=p_prior,
@@ -243,3 +243,17 @@ def fit_screen(
         seed=seed,
         verbose=verbose,
     )
+
+    return FitResults(
+        inference=inference,
+        gene_names=tuple(
+            str(name) for name in (screen_for_fit.gene_names if screen_for_fit.gene_names is not None else ())
+        ),
+        perturbation_names=tuple(
+            str(name)
+            for name in (screen_for_fit.perturbation_names if screen_for_fit.perturbation_names is not None else ())
+        ),
+    )
+
+
+__all__ = ["FitResults", "PerturbData", "fit_screen", "validate_screen"]

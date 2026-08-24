@@ -4,8 +4,8 @@
 
 # PerturbVI
 
-PerturbVI learns latent gene programs and perturbation effects from
-single-cell perturbation screens.
+PerturbVI finds gene programs and estimates how perturbations affect them in
+single-cell screens.
 
 ## Install
 
@@ -15,38 +15,88 @@ uv pip install perturbvi
 
 ## Quick start
 
-Fit a screen:
+`PerturbData` keeps expression, genetic perturbations, and covariates aligned:
+
+| Argument | Shape | Contents |
+|---|---|---|
+| `X` | cells × genes | Normalized, scaled, or transformed expression |
+| `G` | cells × perturbations | Binary guide or target assignments |
+| `covariates` | cells × covariates | Variables whose effects should be removed from expression |
+
+`X` and `G` are required. Include covariates when their effects should be
+removed before the model is fit.
+
+```python
+from perturbvi import PerturbData, fit_screen, residualize_screen
+
+# expression, G, and covariates are aligned tables prepared as described below.
+data = PerturbData(
+    X=expression,
+    G=G,
+    covariates=covariates,
+)
+data = residualize_screen(data)
+fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
+```
+
+All inputs must describe the same cells in the same row order. `PerturbData`
+checks DataFrame row alignment immediately; the remaining shape, name, missing
+value, and binary `G` checks run before fitting. `residualize_screen()` removes
+the supplied covariate effects once; the resulting data can be reused for
+multiple fits. `fit_screen()` then centers expression; pass
+`standardize=True` to also scale each gene to unit variance.
+
+See the [Workflow](https://mancusolab.github.io/perturbvi/workflow/)
+for complete input and analysis guidance and the
+[Input structure](https://mancusolab.github.io/perturbvi/input_structure/)
+page for where each piece of a screen lives in an AnnData file. The
+[Cookbook](https://mancusolab.github.io/perturbvi/cookbook/#3-real-genetic-screens)
+for real Datlinger, Norman, and Adamson screens.
+
+## AnnData and CLI
+
+For AnnData, prepare the file with transformed expression in `adata.X` and the
+binary perturbation matrix in `adata.obsm["G"]`, then load and fit:
+
+```python
+from perturbvi import load_screen
+
+data = load_screen("screen.h5ad")
+```
+
+If `adata.obsm["G"]` includes the reference column, name it so the loader drops
+it before fitting:
+
+```python
+data = load_screen("screen.h5ad", control="control")
+```
+
+The CLI uses the same convention:
 
 ```bash
 perturbvi fit screen.h5ad \
-  --perturbation-column perturbation \
-  --control-label control \
   --output results \
   --z-dim 12 --l-dim 400 --tau 50
 ```
 
-Analyze the saved fit:
+Add `--control control` when `G` keeps its reference column.
+
+Create result tables after fitting:
 
 ```bash
 perturbvi analyze results
 ```
 
-## Cookbook
+## Documentation
 
-- [Shared Python workflow](examples/cookbook.md#shared-function)
-- [Preparing raw expression](examples/cookbook.md#preparing-raw-expression)
-- [LUHMES CSV fit and analysis](examples/cookbook.md#luhmes-csv-fit-and-analysis)
-- [Adamson H5AD and CSV](examples/cookbook.md#adamson-et-al-2016-perturb-seq)
-- [Datlinger CROP-seq](examples/cookbook.md#datlinger-et-al-2017-crop-seq)
-- [Norman CRISPRa with combination perturbations](examples/cookbook.md#norman-et-al-2019-crispra)
-- [Srivatsan sci-Plex](examples/cookbook.md#srivatsan-et-al-2020-sci-plex-2)
-- [10x A375 H5](examples/cookbook.md#10x-genomics-a375-crispr)
-- [10x A549 MEX](examples/cookbook.md#10x-genomics-a549-crispr)
-
-## Reference
-
-See the [API reference](https://mancusolab.github.io/perturbvi/api/) for
-functions, command options, and saved files.
+- [Workflow](https://mancusolab.github.io/perturbvi/workflow/): constructing
+  `X` and `G`, names, covariates, fitting, saving, and analysis.
+- [Input structure](https://mancusolab.github.io/perturbvi/input_structure/):
+  AnnData layout for `X`, `G`, and covariates.
+- [Cookbook](https://mancusolab.github.io/perturbvi/cookbook/): real LUHMES,
+  Datlinger, Adamson, Norman, and A375 10x examples.
+- [API](https://mancusolab.github.io/perturbvi/api/): Python functions, CLI
+  options, result tables, and saved files.
 
 ## Support
 
@@ -82,8 +132,3 @@ Other software developed by the [Mancuso Lab](https://www.mancusolab.com/):
 
 PerturbVI is distributed under the terms of the
 [MIT license](https://spdx.org/licenses/MIT.html).
-
----
-
-This project has been set up using Hatch. See the
-[Hatch documentation](https://hatch.pypa.io/) for usage information.

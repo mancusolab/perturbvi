@@ -1,481 +1,418 @@
 # PerturbVI cookbook
 
-These examples use one function for every PerturbVI run. Each dataset section
-gives its biological background, download source, and runnable analysis.
+## 1. About these examples
 
-## Using the examples
+This cookbook applies PerturbVI to real genetic perturbation screens. The
+[Workflow](workflow.md) is the main explanation of `X`, `G`, names,
+covariates, fitting, saving, and analysis. Here, each example focuses on the
+dataset-specific work needed to create `PerturbData`.
 
-PerturbVI uses a cell-by-gene expression matrix `X` and a matching
-cell-by-perturbation design matrix `G`. Controls are all-zero rows in `G`;
-combination perturbations have more than one active column.
+The examples cover:
 
-`load_screen()` can build `G` from one perturbation label per cell in AnnData
-`obs`, or read an existing binary or multi-hot matrix from `obsm`. For 10x
-data, it matches expression barcodes to a metadata table containing one
-perturbation label per cell. Covariates are optional and are used only when
-residualization is requested.
+- processed LUHMES CROP-seq tables from the GSFA authors;
+- Datlinger CROP-seq with one target label per cell;
+- Adamson CRISPRi with guide identifiers collapsed to target genes;
+- Norman CRISPRa with controls, single targets, and target pairs;
+- A375 10x CRISPR with a barcode-matched calls table.
 
-When `guide_key` supplies labels, pass `control_label` so control cells become
-all-zero rows in `G`. A prepared guide matrix already encodes those rows and
-does not require `control_label`.
+Raw sequencing output is not a PerturbVI input. RNA counts must be processed,
+and guide measurements must already have been converted into final guide or
+target calls. For the AnnData layout of a prepared screen, see
+[Input structure](input_structure.md).
 
-## Shared function
+## 2. A basic raw-count transformation
 
-Define this function once before running any of the dataset examples.
-The Python functions return objects; this helper explicitly saves the fitted
-model and analysis tables. The CLI performs those save steps automatically.
+The downloaded [scPerturb](https://github.com/sanderlab/scPerturb) H5AD files
+used below contain raw RNA counts and published perturbation labels.
+
+The function below performs basic Scanpy QC, selects genes by Pearson-residual
+variance, and replaces `adata.X` with analytic Pearson residuals. It is a
+compact example, not a complete QC policy for every experiment.
 
 ```python
 from pathlib import Path
-from typing import Any, Mapping, Sequence, Union
 
+import anndata as ad
 import pandas as pd
+import scanpy as sc
 
-from perturbvi import analyze, fit_screen, load_screen, residualize_screen, save_results
+from perturbvi import PerturbData, load_screen, residualize_screen
 
 
-def run_perturbvi(
-    source: Any,
-    output_dir: Union[str, Path],
-    *,
-    load_kwargs: Mapping[str, Any],
-    categorical_covariates: Sequence[str] = (),
-    z_dim: int = 3,
-    l_dim: int = 2,
-    tau: float = 1.0,
-    max_iter: int = 10,
-    seed: int = 1,
-    verbose: bool = False,
-):
-    """Load, residualize, fit, save, reload, and analyze one screen."""
-    loader_options = dict(load_kwargs)
-    covariates = list(loader_options.get("covariates") or [])
-    categorical_covariates = list(categorical_covariates)
-    unknown = [name for name in categorical_covariates if name not in covariates]
-    if unknown:
-        raise ValueError(f"Categorical covariates must also be loaded as covariates: {unknown}")
+def transform_counts(
+    adata: ad.AnnData,
+    n_top_genes: int = 6_000,
+    min_genes: int = 200,
+    min_cells: int = 3,
+    max_pct_mt: float = 20.0,
+) -> ad.AnnData:
+    adata = adata.copy()
+    # Scanpy reads and writes the expression matrix in adata.X by default.
+    adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
 
-    if verbose:
-        print(f"input_type: {type(source).__name__}")
-        print(f"load_kwargs: {loader_options}")
-    screen = load_screen(source, **loader_options)
-    if verbose:
-        print(f"loaded_X_shape: {screen.X.shape}")
-        print(f"loaded_G_shape: {screen.G.shape}")
-        print(f"loaded_covariates: {screen.covariate_names}")
-        print(f"source_details: {screen.source}")
-    if covariates:
-        screen = residualize_screen(
-            screen,
-            covariates=covariates,
-            categorical_covariates=categorical_covariates,
-        )
-        if verbose:
-            print(f"residualized_covariates: {covariates}")
-            print(f"categorical_covariates: {categorical_covariates}")
-
-    results = fit_screen(
-        screen,
-        z_dim=z_dim,
-        l_dim=l_dim,
-        tau=tau,
-        max_iter=max_iter,
-        seed=seed,
-        verbose=verbose,
+    sc.pp.calculate_qc_metrics(
+        adata,
+        qc_vars=["mt"],
+        percent_top=None,
+        log1p=False,
+        inplace=True,
     )
+    sc.pp.filter_cells(adata, min_genes=min_genes)
+    adata = adata[adata.obs["pct_counts_mt"] < max_pct_mt].copy()
+    sc.pp.filter_genes(adata, min_cells=min_cells)
 
-    output = Path(output_dir)
-    save_results(results, str(output))
-    tables = analyze(
-        results,
-        gene_names=screen.gene_names,
-        perturbation_names=screen.perturbation_names,
+    sc.experimental.pp.highly_variable_genes(
+        adata,
+        flavor="pearson_residuals",
+        n_top_genes=min(n_top_genes, adata.n_vars),
+        subset=True,
     )
-    for name, table in tables.items():
-        if isinstance(table, pd.DataFrame):
-            table.to_csv(output / f"{name}.csv")
-            if verbose:
-                print(f"analysis_table: {name}, shape={table.shape}")
-
-    return screen, results, tables
+    sc.experimental.pp.normalize_pearson_residuals(adata)
+    return adata
 ```
 
-The defaults above keep these examples short. Set `z_dim`, `l_dim`,
-`max_iter`, and `tau` for the analysis you intend to run.
-`fit_screen()` always centers expression features and scales them to unit
-variance by default. Pass `standardize=False` to center without scaling.
+Pearson-residual normalization expects raw counts. The transformed values stay
+in `adata.X`, which is the matrix that `load_screen()` reads by default. This
+function does not call guides or alter the published perturbation labels.
 
-## Preparing raw expression
+## 3. Real genetic screens
 
-If `adata.X` contains raw counts, the following code calculates two commonly
-used technical covariates and creates a log-normalized expression matrix.
+### 3.1 LUHMES CROP-seq: processed X and G
+
+The [LUHMES study](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE142078)
+targeted neurodevelopmental genes with CRISPR knockdown in neural progenitor
+cells. This example uses the processed matrices from the
+[GSFA LUHMES workflow](https://xinhe-lab.github.io/GSFA_paper/preprocess_and_gsfa_LUHMES.html),
+not the raw Cell Ranger files.
 
 ```python
-import numpy as np
-import scanpy as sc
-
-total_counts = np.asarray(adata.X.sum(axis=1)).reshape(-1)
-mitochondrial = adata.var_names.astype(str).str.upper().str.startswith("MT-")
-mitochondrial_counts = np.asarray(adata[:, mitochondrial].X.sum(axis=1)).reshape(-1)
-
-adata.obs["log_total_counts"] = np.log1p(total_counts)
-adata.obs["percent_mito"] = np.divide(
-    mitochondrial_counts * 100,
-    total_counts,
-    out=np.zeros_like(total_counts, dtype=float),
-    where=total_counts > 0,
+expression = pd.read_csv("luhmes_exp.csv", index_col=0)
+G = pd.read_csv("luhmes_G.csv", index_col=0).drop(columns="Nontargeting")
+gene_names = (
+    pd.read_csv("luhmes_gene_symbol.csv", header=None)
+    .iloc[:, 0]
+    .astype(str)
+    .tolist()
 )
 
-sc.pp.normalize_total(adata, target_sum=10_000)
-sc.pp.log1p(adata)
-```
-
-Do not repeat this step when the selected expression matrix is already
-normalized. Perturbation and control labels must come from upstream guide
-calling or curated experiment metadata. Change the mitochondrial-gene mask if
-the annotation does not use `MT-` symbols.
-
-Download each dataset from the source linked in its section. Set `DATA` to the
-directory containing your prepared files and change the example filenames if
-needed. Results are written beneath `OUTPUT`.
-
-```python
-from pathlib import Path
-
-DATA = Path("/path/to/your/data")
-OUTPUT = Path("perturbvi_results")
-```
-
-## LUHMES CSV fit and analysis
-
-This human neuronal differentiation screen used dCas9-based transcriptional
-repression to study autism and neurodevelopmental disease genes. LUHMES cells
-received a library of 47 sgRNAs targeting 14 genes or serving as non-targeting
-controls. Low-multiplicity transduction enriched for one perturbation per cell;
-the cells were then differentiated for eight days and profiled with 10x
-Chromium. CROP-seq recovered the sgRNA assignments from polyadenylated RNA.
-
-The data are available from GEO as
-[GSE142078](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE142078). The
-experiment is described by [Lalli et al., Genome Research
-2020](https://pubmed.ncbi.nlm.nih.gov/32887689/).
-
-This workflow uses a cell-by-gene expression table, a cell-by-guide table, and
-a one-column gene-symbol file. `Nontargeting` is the control column in
-`luhmes_G.csv`; PerturbVI removes that column from `G` and treats its cells as
-controls. The expression and guide tables must use the same unique cell names.
-The `--gene-names` option is used here because the gene symbols are stored in a
-separate file. It replaces the gene labels in the analysis tables without
-changing the fit.
-
-```bash
-perturbvi fit luhmes_exp.csv \
-  --guide-matrix luhmes_G.csv \
-  --control-label Nontargeting \
-  --z-dim 12 \
-  --l-dim 400 \
-  --tau 800 \
-  --output results \
-  --verbose
-
-perturbvi analyze results \
-  --gene-names luhmes_gene_symbol.csv \
-  --compute-lfsr \
-  --verbose
-```
-
-The fit and analysis tables are saved under `results`, including
-`params_file.pkl`. Analysis uses the built-in cutoffs: PIP at least `0.9` and
-LFSR at most `0.05`.
-
-```python
-from pathlib import Path
-
-import pandas as pd
-
-results = Path("results")
-pip = pd.read_csv(results / "pip.csv", index_col=0)
-lfsr = pd.read_csv(results / "lfsr.csv", index_col=0)
-
-num_deg_per_w = (pip >= 0.9).sum(axis=0)
-num_deg_per_perturbed_gene = (lfsr <= 0.05).sum(axis=0)
-
-print(num_deg_per_w)
-print(num_deg_per_perturbed_gene)
-```
-
-## scPerturb datasets
-
-[scPerturb](https://www.sanderlab.org/scPerturb/) distributes harmonized H5AD
-files with expression in `X` and perturbation metadata in `obs`. The examples
-below use its published cell-level labels; PerturbVI does not call guides.
-The covariates and experimental designs differ, so each has its own short
-block.
-
-### Adamson et al. 2016 Perturb-seq
-
-This pilot Perturb-seq experiment used CRISPR interference in K562 leukemia
-cells to measure the transcriptional effects of repressing seven transcription
-factors. Each cell has an assigned sgRNA target or the negative-control label.
-The experiment was part of the study that introduced Perturb-seq and used the
-method to dissect the mammalian unfolded protein response.
-
-The source file, `AdamsonWeissman2016_GSM2406675_10X001.h5ad`, comes from the
-[scPerturb collection on Zenodo](https://zenodo.org/records/7278143).
-The experiment is described in the original [Cell
-paper](https://pmc.ncbi.nlm.nih.gov/articles/PMC5315571/).
-
-#### H5AD
-
-This file has one perturbation label per cell and one numeric covariate.
-
-```python
-import anndata as ad
-
-path = DATA / "adamson_2016.h5ad"
-adata = ad.read_h5ad(path, backed="r")
-print(adata.shape)
-print(adata.obs["perturbation"].value_counts().head())
-print(adata.obs[["log_total_counts"]].describe())
-adata.file.close()
-
-screen, results, tables = run_perturbvi(
-    path,
-    OUTPUT / "adamson_h5ad",
-    load_kwargs={
-        "guide_key": "perturbation",
-        "control_label": "control",
-        "covariates": ["log_total_counts"],
-    },
+data = PerturbData(
+    X=expression.set_axis(gene_names, axis="columns"),
+    G=G,
 )
+
+output = Path("work/output/cookbook/luhmes")
 ```
 
-`log_total_counts` is numeric, so it is not listed under
-`categorical_covariates`.
+The expression table was already transformed, selected, corrected, and scaled
+in the published workflow. The non-targeting column is removed from `G`, so
+control cells have all-zero rows. No covariates are passed because the
+published expression table was already corrected.
 
-#### CSV
+### 3.2 Datlinger CROP-seq: one target per cell
 
-The same Adamson cells are also exported as separate expression, guide, and
-metadata tables. All three tables must contain the same cells in the same
-order. Controls are the all-zero rows of `guides.csv`.
+The [Datlinger CROP-seq study](https://www.nature.com/articles/nmeth.4177)
+provides a final target gene for each perturbed cell. Missing targets identify
+published controls. These are ten real rows from
+`DatlingerBock2017.h5ad` before the example's QC:
 
-```python
-import pandas as pd
-
-directory = DATA / "delimited"
-expression_path = directory / "expression.csv"
-guide_path = directory / "guides.csv"
-metadata_path = directory / "metadata.csv"
-
-expression = pd.read_csv(expression_path, index_col=0)
-guides = pd.read_csv(guide_path, index_col=0)
-metadata = pd.read_csv(metadata_path, index_col=0)
-
-assert expression.index.equals(guides.index)
-assert expression.index.equals(metadata.index)
-print(expression.shape, guides.shape)
-print(guides.sum().sort_values(ascending=False).head())
-print(metadata.describe())
-
-screen, results, tables = run_perturbvi(
-    expression_path,
-    OUTPUT / "adamson_csv",
-    load_kwargs={
-        "format": "csv",
-        "guide_path": str(guide_path),
-        "metadata_path": str(metadata_path),
-        "covariates": ["log_total_counts"],
-    },
-)
+```text
+cell          perturbation          perturbation_2  replicate  target  ncounts  ngenes  percent_mito  nperts
+TACTTGACCCCN  control               stimulated          1  NaN        8696    2722          0.29       1
+TTACAGCTGAAC  Tcrlibrary_JUND_2     stimulated          1  JUND       3198    1581          5.07       3
+CTAAGGCCCTTA  Tcrlibrary_BACH2_3    stimulated          1  BACH2      8137    2856          4.35       3
+CTTGACGCAGGT  Tcrlibrary_NFKB2_3    stimulated          1  NFKB2      7051    2687          9.03       3
+TAACCCGTACGC  Tcrlibrary_JUN_1      stimulated          1  JUN        5453    2122         12.14       3
+ATCTAGATACNN  control               stimulated          1  NaN        2465    1336          2.84       1
+CTATCGTTCTTN  Tcrlibrary_NFKB1_1    stimulated          1  NFKB1      1033     589         22.65       3
+GTATTGCGAGCN  Tcrlibrary_JUND_3     stimulated          1  JUND      27397    5618          3.15       3
+GTACTGTGTTAN  Tcrlibrary_JUNB_1     stimulated          1  JUNB      14008    3739          4.41       3
+CGTCTTTCANNN  Tcrlibrary_NFKB2_2    stimulated          1  NFKB2      6491    2726          5.18       3
 ```
 
-### Datlinger et al. 2017 CROP-seq
-
-This CROP-seq experiment used CRISPR knockout in Jurkat T cells to study
-regulators of T-cell receptor signaling. Single-cell RNA sequencing linked each
-guide to its transcriptional effect in stimulated and unstimulated cells.
-
-The source file, `DatlingerBock2017.h5ad`, was downloaded from the [scPerturb
-collection on Zenodo](https://zenodo.org/records/13350497). The experiment is
-described in the original [Nature Methods
-paper](https://www.nature.com/articles/nmeth.4177).
-
-`replicate` identifies experimental replicates and is treated as categorical.
+Replace missing targets with the control label, transform expression, and store
+the one-hot target matrix at `obsm["G"]`; `control=` tells the loader to drop
+the reference column. This example treats replicate and mitochondrial
+percentage as covariates:
 
 ```python
-import anndata as ad
+adata = ad.read_h5ad(Path("work/data/raw/DatlingerBock2017.h5ad"))
+adata.obs["target"] = adata.obs["target"].astype("string").fillna("control")
+adata.obs["replicate"] = adata.obs["replicate"].astype("category")
+adata = transform_counts(adata)
 
-adata = ad.read_h5ad(DATA / "datlinger_2017.h5ad")
-print(adata.shape)
-print(adata.obs["perturbation"].value_counts().head())
-print(adata.obs[["replicate", "log_total_counts", "percent_mito"]].head())
-
-screen, results, tables = run_perturbvi(
+adata.obsm["G"] = adata.obs["target"].str.get_dummies().astype(int)
+data = load_screen(
     adata,
-    OUTPUT / "datlinger_anndata",
-    load_kwargs={
-        "guide_key": "perturbation",
-        "control_label": "control",
-        "covariates": ["replicate", "log_total_counts", "percent_mito"],
-    },
-    categorical_covariates=["replicate"],
+    control="control",
+    covariates=["replicate", "percent_mito"],
 )
+data = residualize_screen(data)
+
+output = Path("work/output/cookbook/datlinger_2017")
 ```
 
-### Norman et al. 2019 CRISPRa
+The target labels map to binary columns like this. Cells removed by the chosen
+QC are not included in the fitted `G`:
 
-This Perturb-seq experiment activated single genes and gene pairs in K562
-leukemia cells using CRISPRa. The study used the resulting single-cell
-transcriptional phenotypes to map genetic interactions and cell-state changes.
+```text
+cell          G[JUND]  G[BACH2]  G[NFKB2]  G[JUN]  G[NFKB1]  G[JUNB]
+TACTTGACCCCN        0         0         0       0         0        0
+TTACAGCTGAAC        1         0         0       0         0        0
+CTAAGGCCCTTA        0         1         0       0         0        0
+CTTGACGCAGGT        0         0         1       0         0        0
+TAACCCGTACGC        0         0         0       1         0        0
+ATCTAGATACNN        0         0         0       0         0        0
+CTATCGTTCTTN        0         0         0       0         1        0
+GTATTGCGAGCN        1         0         0       0         0        0
+GTACTGTGTTAN        0         0         0       0         0        1
+CGTCTTTCANNN        0         0         1       0         0        0
+```
 
-The source file, `NormanWeissman2019_filtered.h5ad`, was downloaded from the
-[scPerturb collection on Zenodo](https://zenodo.org/records/13350497). The
-experiment is described in the original [Science
-paper](https://pmc.ncbi.nlm.nih.gov/articles/PMC6746554/).
+### 3.3 Adamson CRISPRi: guides collapsed to targets
 
-The named matrix in `adata.obsm["guide_matrix"]` has one column per target.
-Control cells are its all-zero rows.
+The [Adamson Perturb-seq study](https://pmc.ncbi.nlm.nih.gov/articles/PMC5315571/)
+used CRISPR interference in K562 cells. The downloaded file stores a target
+and guide identifier together in `obs["perturbation"]`:
+
+```text
+cell            perturbation      read count  UMI count  ncounts  ngenes  percent_mito  percent_ribo
+AAACATACACCGAT  CREB1_pDS269            1286         98     8138    2412          0.00         34.04
+AAACATACAGAGAT  SNAI1_pDS266             296         19     8980    2386          0.00         40.01
+AAACATACCAGAAA  62(mod)_pBA581           1829        162    28610    4404          0.00         40.00
+AAACATACGTTGAC  EP300_pDS268            1580         98    11346    2815          0.00         35.18
+AAACATACTGTTCT  62(mod)_pBA581            748         51     9864    2584          0.00         35.82
+AAACCGTGCAGCTA  ZNF326_pDS262             789         55    10470    2575          0.00         36.69
+AAACCGTGCCTGAA  62(mod)_pBA581            802         56    10649    2660          0.00         40.14
+AAACCGTGCGGAGA  62(mod)_pBA581            300         18     9293    2769          0.00         27.29
+AAACCGTGGAACTC  CREB1_pDS269              275         17     3857    1369          0.00         38.89
+AAACCGTGTGGCAT  62(mod)_pBA581           1275         81    11813    2689          0.00         38.62
+```
+
+Use the text before `_` as the target. In this file, `62(mod)` is the control
+and `*` labels are excluded. This example treats ribosomal percentage as a
+covariate:
 
 ```python
-import anndata as ad
-import numpy as np
-import pandas as pd
+adata = ad.read_h5ad(
+    Path("work/data/raw/AdamsonWeissman2016_GSM2406675_10X001.h5ad")
+)
+labels = adata.obs["perturbation"].astype("string").str.split("_", n=1).str[0]
+adata.obs["target"] = labels.replace({"62(mod)": "control"}).mask(labels == "*")
+adata = adata[adata.obs["target"].notna()].copy()
+adata = transform_counts(adata)
 
-adata = ad.read_h5ad(DATA / "norman_2019.h5ad")
-guides = adata.obsm["guide_matrix"]
-assignments_per_cell = np.asarray(guides.sum(axis=1)).reshape(-1)
-
-print(adata.shape, guides.shape)
-print(pd.Series(assignments_per_cell).value_counts().sort_index())
-print(adata.obs[["gemgroup", "log_total_counts", "percent_mito"]].head())
-
-screen, results, tables = run_perturbvi(
+adata.obsm["G"] = adata.obs["target"].str.get_dummies().astype(int)
+data = load_screen(
     adata,
-    OUTPUT / "norman_multiguide",
-    load_kwargs={
-        "guide_obsm": "guide_matrix",
-        "covariates": ["gemgroup", "log_total_counts", "percent_mito"],
-    },
-    categorical_covariates=["gemgroup"],
+    control="control",
+    covariates=["percent_ribo"],
 )
+data = residualize_screen(data)
+
+output = Path("work/output/cookbook/adamson_2016")
 ```
 
-### Srivatsan et al. 2020 sci-Plex 2
+The first ten target labels produce this excerpt from `G`:
 
-This sci-Plex experiment measured dose-dependent transcriptional responses in
-A549 lung adenocarcinoma cells treated with BMS-345541, dexamethasone,
-nutlin-3a, SAHA, or vehicle. Cells were assigned to treatments by nuclear
-hashing before single-cell RNA sequencing.
+```text
+cell            G[CREB1]  G[SNAI1]  G[EP300]  G[ZNF326]
+AAACATACACCGAT         1         0         0          0
+AAACATACAGAGAT         0         1         0          0
+AAACATACCAGAAA         0         0         0          0
+AAACATACGTTGAC         0         0         1          0
+AAACATACTGTTCT         0         0         0          0
+AAACCGTGCAGCTA         0         0         0          1
+AAACCGTGCCTGAA         0         0         0          0
+AAACCGTGCGGAGA         0         0         0          0
+AAACCGTGGAACTC         1         0         0          0
+AAACCGTGTGGCAT         0         0         0          0
+```
 
-The source file, `SrivatsanTrapnell2020_sciplex2.h5ad`, was downloaded from the
-[scPerturb collection on Zenodo](https://zenodo.org/records/13350497). The
-experiment is described in the original [Science
-paper](https://pmc.ncbi.nlm.nih.gov/articles/PMC7289078/).
+Multiple guide identifiers can therefore contribute cells to the same target
+column.
 
-Drug and dose are combined into the `perturbation` label. Sequencing
-depth and mitochondrial percentage are numeric residualization covariates.
+### 3.4 Norman CRISPRa: single targets and target pairs
+
+The [Norman study](https://doi.org/10.1126/science.aax4438) used a dual-sgRNA
+CRISPRa library in K562 cells. The downloaded H5AD contains controls,
+single-target cells, and target-pair cells:
+
+```text
+cell              guide_id                                      gemgroup  perturbation    nperts  ncounts  ngenes  percent_mito
+AGACGTTGTCTAGCGC  NegCtrl10_NegCtrl0;NegCtrl10_NegCtrl0                2  control              0    21172    4312          7.69
+ACGGAGACACACCGCA  NegCtrl0_CEBPE;NegCtrl0_CEBPE                        7  CEBPE                1    11928    2770          5.53
+ACCAGTATCGGAGGTA  NegCtrl0_RUNX1T1;NegCtrl0_RUNX1T1                    2  RUNX1T1              1    12984    3067          7.23
+AACTCAGAGACTGGGT  CEBPE_RUNX1T1;CEBPE_RUNX1T1                          5  CEBPE_RUNX1T1        2    22491    4026          3.06
+ATGAGGGCATTGGCGC  SET_NegCtrl0;SET_NegCtrl0                            2  SET                  1    16385    3501          3.75
+GTACTTTTCAGTTGAC  KLF1_NegCtrl0;KLF1_NegCtrl0                          7  KLF1                 1    62356    6515          6.66
+CCTTCCCTCCGTCATC  SET_KLF1;SET_KLF1                                    4  SET_KLF1             2    38454    5385          4.34
+CGAGAAGTCTTGAGGT  CBL_NegCtrl0;CBL_NegCtrl0                            5  CBL                  1    20423    4005          3.36
+GTTACAGCAATGTTGC  CNN1_NegCtrl0;CNN1_NegCtrl0                          8  CNN1                 1    21875    4138          5.55
+TGGCTGGTCTTGAGAC  CBL_CNN1;CBL_CNN1                                    5  CBL_CNN1             2    18730    3981          5.03
+```
+
+Here `G` models target presence. Split the published target-pair labels at
+`_`, while controls remain all-zero rows. This example treats gem group and
+mitochondrial percentage as covariates:
 
 ```python
-import anndata as ad
+adata = ad.read_h5ad(Path("work/data/raw/NormanWeissman2019_filtered.h5ad"))
+adata.obs["gemgroup"] = adata.obs["gemgroup"].astype("category")
+adata = transform_counts(adata)
 
-path = DATA / "sciplex2_2020.h5ad"
-adata = ad.read_h5ad(path, backed="r")
-print(adata.shape)
-print(adata.obs["perturbation"].value_counts().head())
-print(adata.obs[["log_total_counts", "percent_mito"]].describe())
-adata.file.close()
+labels = adata.obs["perturbation"].astype("string")
+G = labels.mask(labels == "control", "").str.get_dummies(sep="_").astype("int8")
+assert (G.sum(axis=1).to_numpy() == adata.obs["nperts"].to_numpy()).all()
 
-screen, results, tables = run_perturbvi(
-    path,
-    OUTPUT / "sciplex_h5ad",
-    load_kwargs={
-        "guide_key": "perturbation",
-        "control_label": "control",
-        "covariates": ["log_total_counts", "percent_mito"],
-    },
+data = PerturbData(
+    X=adata.X,
+    G=G,
+    gene_names=adata.var_names,
+    covariates=adata.obs[["gemgroup", "percent_mito"]],
 )
+data = residualize_screen(data)
+
+output = Path("work/output/cookbook/norman_2019")
 ```
 
-## 10x Genomics A375 CRISPR
+The same label conversion gives controls zero active columns, single targets
+one, and target pairs two:
 
-This dataset contains A375 melanoma cells stably expressing dCas9 and
-separately transduced with either a RAB1A-targeting sgRNA or a non-targeting
-sgRNA. Gene-expression and CRISPR libraries were profiled with the Chromium
-GEM-X Single Cell 5' assay.
+```text
+cell              G[CEBPE]  G[RUNX1T1]  G[SET]  G[KLF1]  G[CBL]  G[CNN1]
+AGACGTTGTCTAGCGC         0           0       0        0       0        0
+ACGGAGACACACCGCA         1           0       0        0       0        0
+ACCAGTATCGGAGGTA         0           1       0        0       0        0
+AACTCAGAGACTGGGT         1           1       0        0       0        0
+ATGAGGGCATTGGCGC         0           0       1        0       0        0
+GTACTTTTCAGTTGAC         0           0       0        1       0        0
+CCTTCCCTCCGTCATC         0           0       1        1       0        0
+CGAGAAGTCTTGAGGT         0           0       0        0       1        0
+GTTACAGCAATGTTGC         0           0       0        0       0        1
+TGGCTGGTCTTGAGAC         0           0       0        0       1        1
+```
 
-The filtered feature-barcode matrix and Cell Ranger CRISPR calls were downloaded
-from the [10x Genomics A375 dataset
-page](https://www.10xgenomics.com/datasets/1k-CRISPR-5p-gemx).
+PerturbVI uses this additive target matrix; it does not reproduce the original
+paper's separate genetic-interaction regression.
 
-The 10x matrix supplies expression and barcodes. The metadata table supplies
-the confident target/control calls and covariates.
+### 3.5 A375 10x CRISPR: H5 matrix plus separate calls
+
+The 10x H5 file contains feature counts and barcodes. It does not contain an
+AnnData `obs` table or confident biological calls. The companion calls table
+below is the explicit upstream Cell Ranger call result supplied with this
+example; it matches all 48 retained barcodes. Its first ten rows are:
+
+```text
+cell                  perturbation  log_total_counts  percent_mito
+AAGCAAATCAGAGAAC-1    control                 7.754          4.376
+AAGCCAACACCACTAG-1    control                 9.932          4.009
+AAGCTCATCACAACGC-1    control                 9.691          0.946
+AATCCTCTCATTATCT-1    RAB1A                   10.392          3.834
+ACAAGAGGTCGTAATA-1    control                 9.036          4.022
+ACAATTATCCCCATGC-1    control                 9.401          5.163
+ACACGGTTCAGTTGGC-1    control                10.227          3.966
+ACACGGTTCCTTCGCA-1    control                 9.873          4.493
+ACCACATCACCACGGT-1    control                10.079          4.262
+ACCTACGCAACACGGG-1    control                 9.820          3.647
+```
+
+Read the 10x matrix and the separate calls table with Scanpy and pandas, keep
+only gene-expression features, and join the calls by barcode. Scanpy is used
+here as an external file reader; `load_screen()` still receives an AnnData
+object. If you have only the H5 matrix, this step cannot construct `G`: you
+must first obtain confident guide or target calls from Cell Ranger or another
+documented calling method.
 
 ```python
-import pandas as pd
-import scanpy as sc
-
-matrix_path = DATA / "a375_10x_h5.h5"
-metadata_path = DATA / "a375_10x_h5_metadata.tsv"
-
-matrix = sc.read_10x_h5(matrix_path, gex_only=False)
-metadata = pd.read_csv(metadata_path, sep="\t", index_col=0)
-
-print(matrix.shape)
-print(matrix.var["feature_types"].value_counts())
-print(metadata["perturbation"].value_counts().head())
-print(metadata[["log_total_counts", "percent_mito"]].describe())
-
-screen, results, tables = run_perturbvi(
-    matrix_path,
-    OUTPUT / "a375_10x_h5",
-    load_kwargs={
-        "format": "10x-h5",
-        "metadata_path": str(metadata_path),
-        "guide_key": "perturbation",
-        "control_label": "control",
-        "covariates": ["log_total_counts", "percent_mito"],
-    },
+matrix = sc.read_10x_h5(
+    Path("work/data/raw/a375_1k_filtered_feature_bc_matrix.h5"),
+    gex_only=False,
 )
+adata = matrix[:, matrix.var["feature_types"] == "Gene Expression"].copy()
+adata.var_names_make_unique()
+
+calls = pd.read_csv(
+    Path("work/data/prepared/a375_10x_h5_metadata.tsv"),
+    sep="\t",
+    index_col=0,
+)
+# These are already called perturbations, not guide-count thresholds.
+calls.index = calls.index.astype(str)
+unknown = calls.index.difference(adata.obs_names)
+if len(unknown):
+    raise ValueError(f"Calls contain unknown barcodes: {unknown[:5].tolist()}")
+
+adata = adata[calls.index].copy()
+adata.obs = adata.obs.join(calls)
+adata.obs["perturbation"] = adata.obs["perturbation"].astype("category")
+# transform_counts transforms the gene-expression matrix in adata.X only.
+adata = transform_counts(adata)
+
+adata.obsm["G"] = (adata.obs["perturbation"] == "RAB1A").astype(int).to_frame()
+data = load_screen(
+    adata,
+    covariates=["log_total_counts", "percent_mito"],
+)
+data = residualize_screen(data)
+
+output = Path("work/output/cookbook/a375_10x")
 ```
 
-## 10x Genomics A549 CRISPR
+The resulting `G` has one modeled target column, `RAB1A`:
 
-This dataset contains A549 lung carcinoma cells expressing dCas9-KRAB and
-transduced with a pool of 93 sgRNAs: 90 guides targeting 45 genes and three
-non-targeting controls. The experiment couples 3' gene expression with direct
-capture of the sgRNAs.
+```text
+cell                  G[RAB1A]
+AAGCAAATCAGAGAAC-1           0
+AAGCCAACACCACTAG-1           0
+AAGCTCATCACAACGC-1           0
+AATCCTCTCATTATCT-1           1
+ACAAGAGGTCGTAATA-1           0
+ACAATTATCCCCATGC-1           0
+ACACGGTTCAGTTGGC-1           0
+ACACGGTTCCTTCGCA-1           0
+ACCACATCACCACGGT-1           0
+ACCTACGCAACACGGG-1           0
+```
 
-The feature-barcode matrix and Cell Ranger CRISPR calls were downloaded from
-the [10x Genomics A549 dataset
-page](https://www.10xgenomics.com/datasets/5-k-a-549-lung-carcinoma-cells-no-treatment-transduced-with-a-crispr-pool-3-1-standard-6-0-0).
+This preview is sorted by barcode, not by perturbation, so it happens to show
+mostly controls. In the complete 48-cell subset there are 32 control cells and
+16 RAB1A cells. Because the control is the reference rather than a modeled
+column, `G[RAB1A] = 0` means control and `G[RAB1A] = 1` means RAB1A.
 
-Current MEX uses `matrix.mtx`, three-column `features.tsv`, and
-`barcodes.tsv`; compressed files are accepted.
+Do not threshold the guide-capture counts in the H5 file and call the result
+`G` without an explicit calling method. Here, `G` comes from the matched calls
+table, while expression comes from the 10x gene-expression features.
+
+## 4. Fit, save, and analyze an example
+
+Each dataset section defines `data` and `output`. After running one of them:
 
 ```python
-import pandas as pd
-import scanpy as sc
+from perturbvi import fit_screen, save_results
+from perturbvi.utils import analyze
 
-matrix_path = DATA / "a549_10x_mex_mex"
-metadata_path = DATA / "a549_10x_mex_metadata.tsv"
-
-matrix = sc.read_10x_mtx(matrix_path, gex_only=False)
-metadata = pd.read_csv(metadata_path, sep="\t", index_col=0)
-
-print(matrix.shape)
-print(matrix.var["feature_types"].value_counts())
-print(metadata["perturbation"].value_counts().head())
-print(metadata[["log_total_counts", "percent_mito"]].describe())
-
-screen, results, tables = run_perturbvi(
-    matrix_path,
-    OUTPUT / "a549_10x_mex",
-    load_kwargs={
-        "format": "10x-mex",
-        "metadata_path": str(metadata_path),
-        "guide_key": "perturbation",
-        "control_label": "control",
-        "covariates": ["log_total_counts", "percent_mito"],
-    },
+fit = fit_screen(
+    data,
+    z_dim=12,
+    l_dim=100,
+    tau=800.0,
+    max_iter=500,
+    seed=1,
+    verbose=True,
 )
+
+save_results(fit, str(output))
+
+tables = analyze(
+    fit,
+    compute_lfsr=True,
+    lfsr_iters=2_000,
+    seed=1,
+)
+
+for name, table in tables.items():
+    table.to_csv(output / f"{name}.csv")
 ```
+
+The [Workflow](workflow.md#5-save-and-analyze) explains what each stage does,
+and the [API](api.md) lists every model setting and result table.

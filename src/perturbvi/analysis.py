@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import numbers
 
 from pathlib import Path
@@ -9,307 +8,22 @@ from typing import Optional, Sequence, TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from .screen import FitResults
+
 
 if TYPE_CHECKING:
     from .infer import InferResults
 
 
-def _validate_threshold(value: float, name: str) -> None:
-    if isinstance(value, (bool, str, bytes)):
-        raise ValueError(f"{name} must be a numeric value between 0 and 1; received {value!r}")
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be a numeric value between 0 and 1; received {value!r}") from exc
-    if not np.isfinite(numeric) or not 0 <= numeric <= 1:
-        raise ValueError(f"{name} must be between 0 and 1; received {value}")
-
-
-def _labels(names: Optional[Sequence[str]], size: int, label: str) -> list:
+def _labels(names: Optional[Sequence[str]], size: int, label: str) -> list[str] | list[int]:
     if names is None:
         return list(range(size))
-    names = list(names)
-    if len(names) != size:
-        raise ValueError(f"{label} has {len(names)} entries but expected {size}")
-    if np.asarray(pd.isna(names), dtype=bool).any():
-        raise ValueError(f"{label} contains missing values")
-    as_strings = [str(name) for name in names]
-    if len(set(as_strings)) != len(as_strings):
+    values = [str(name) for name in names]
+    if len(values) != size:
+        raise ValueError(f"{label} has {len(values)} entries; expected {size}")
+    if len(values) != len(set(values)):
         raise ValueError(f"{label} contains duplicate names")
-    return names
-
-
-def _validate_results(results) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    params = results.params
-    pip = np.asarray(results.pip)
-    pve = np.asarray(results.pve).reshape(-1)
-    W = np.asarray(params.W)
-    mean_beta = np.asarray(params.mean_beta)
-    p_hat = np.asarray(params.p_hat)
-    if pip.ndim != 2:
-        raise ValueError(f"results.pip must be 2D; got shape {pip.shape}")
-    z_dim, gene_count = pip.shape
-    if W.shape != (z_dim, gene_count):
-        raise ValueError(f"params.W has shape {W.shape}; expected {(z_dim, gene_count)}")
-    if pve.shape != (z_dim,):
-        raise ValueError(f"results.pve has shape {pve.shape}; expected {(z_dim,)}")
-    if mean_beta.ndim != 2 or mean_beta.shape[1] != z_dim:
-        raise ValueError(f"params.mean_beta has incompatible shape {mean_beta.shape}")
-    if p_hat.shape != (z_dim, mean_beta.shape[0]):
-        raise ValueError(f"params.p_hat has shape {p_hat.shape}; expected {(z_dim, mean_beta.shape[0])}")
-    for name, value in {"pip": pip, "pve": pve, "W": W, "mean_beta": mean_beta, "p_hat": p_hat}.items():
-        if not np.all(np.isfinite(value)):
-            raise ValueError(f"results contain non-finite values in {name}")
-    return pip, pve, W, mean_beta, p_hat
-
-
-def _pip_significant_table(pip_df: pd.DataFrame, threshold: float) -> pd.DataFrame:
-    rows = []
-    for factor in pip_df.columns:
-        selected = pip_df.index[pip_df[factor] >= threshold]
-        rows.extend({"factor": factor, "gene": gene, "pip": pip_df.at[gene, factor]} for gene in selected)
-    return pd.DataFrame(rows, columns=["factor", "gene", "pip"])
-
-
-def _attach_lfsr(
-    tables: dict,
-    lfsr_df: pd.DataFrame,
-    *,
-    gene_names: Sequence,
-    perturbation_names: Sequence,
-    lfsr_threshold: float,
-) -> None:
-    expected = (len(gene_names), len(perturbation_names))
-    if lfsr_df.shape != expected:
-        raise ValueError(f"LFSR table has shape {lfsr_df.shape}; expected {expected}")
-
-    observed_genes = [str(name) for name in lfsr_df.index]
-    expected_genes = [str(name) for name in gene_names]
-    if observed_genes != expected_genes:
-        raise ValueError("LFSR gene labels do not match the current fit")
-
-    observed_perturbations = [str(name) for name in lfsr_df.columns]
-    expected_perturbations = [str(name) for name in perturbation_names]
-    if observed_perturbations != expected_perturbations:
-        raise ValueError("LFSR perturbation labels do not match the current fit")
-
-    lfsr_df = pd.DataFrame(lfsr_df.to_numpy(), index=gene_names, columns=perturbation_names)
-    rows = []
-    for perturbation in lfsr_df.columns:
-        selected = lfsr_df.index[lfsr_df[perturbation] <= lfsr_threshold]
-        rows.extend(
-            {
-                "perturbation": perturbation,
-                "gene": gene,
-                "lfsr": lfsr_df.at[gene, perturbation],
-            }
-            for gene in selected
-        )
-    tables["lfsr"] = lfsr_df
-    tables["lfsr_significant"] = pd.DataFrame(rows, columns=["perturbation", "gene", "lfsr"])
-
-
-def _analyze_result(
-    results,
-    *,
-    gene_names: Optional[Sequence[str]] = None,
-    perturbation_names: Optional[Sequence[str]] = None,
-    pip_threshold: float = 0.9,
-    lfsr_threshold: float = 0.05,
-    compute_lfsr: bool = False,
-    lfsr_iters: int = 2000,
-    seed: int = 0,
-) -> dict:
-    """Build explicit tables from an in-memory fit without implicit I/O.
-
-    Args:
-        results: An :class:`InferResults` returned by ``infer`` or ``fit_screen``.
-        gene_names: Optional labels for expression features.
-        perturbation_names: Optional labels for guide features.
-        pip_threshold: Inclusive lower bound used by ``pip_significant``.
-        lfsr_threshold: Inclusive upper bound used by ``lfsr_significant``.
-        compute_lfsr: Explicitly run the expensive Monte Carlo LFSR step.
-        lfsr_iters: Positive number of Monte Carlo iterations.
-        seed: Integer random seed passed to LFSR computation.
-
-    Returns:
-        A dictionary of PIP, PVE, perturbation-effect, inclusion-probability,
-        overall-effect, and threshold-summary DataFrames. LFSR entries are
-        ``None`` unless explicitly computed.
-    """
-    _validate_threshold(pip_threshold, "pip_threshold")
-    _validate_threshold(lfsr_threshold, "lfsr_threshold")
-    if isinstance(lfsr_iters, bool) or not isinstance(lfsr_iters, numbers.Integral) or lfsr_iters <= 0:
-        raise ValueError(f"lfsr_iters must be a positive integer; received {lfsr_iters}")
-    if isinstance(seed, bool) or not isinstance(seed, numbers.Integral):
-        raise ValueError(f"seed must be an integer; received {seed!r}")
-
-    pip, pve, W, mean_beta, p_hat = _validate_results(results)
-    z_dim, gene_count = pip.shape
-    perturbation_count = mean_beta.shape[0]
-    genes = _labels(gene_names, gene_count, "gene_names")
-    perturbations = _labels(perturbation_names, perturbation_count, "perturbation_names")
-    factor_names = [f"w{index}" for index in range(z_dim)]
-    beta_names = [f"b{index}" for index in range(z_dim)]
-
-    pip_df = pd.DataFrame(pip.T, columns=factor_names, index=genes)
-    beta_sparse = mean_beta * p_hat.T
-    beta_df = pd.DataFrame(beta_sparse, columns=beta_names, index=perturbations)
-    p_hat_df = pd.DataFrame(p_hat.T, columns=beta_names, index=perturbations)
-    overall_effect_df = pd.DataFrame((beta_sparse @ W).T, columns=perturbations, index=genes)
-    pip_summary_df = pd.DataFrame(
-        {
-            "factor": factor_names,
-            "pve": pve,
-            "n_pip_significant": (pip >= pip_threshold).sum(axis=1),
-        }
-    )
-
-    tables = {
-        "pip": pip_df,
-        "pve": pd.DataFrame({"factor": factor_names, "pve": pve}),
-        "beta": beta_df,
-        "p_hat": p_hat_df,
-        "overall_effect": overall_effect_df,
-        "pip_significant": _pip_significant_table(pip_df, pip_threshold),
-        "pip_summary": pip_summary_df,
-        "lfsr": None,
-        "lfsr_significant": None,
-    }
-    if compute_lfsr:
-        lfsr_df = _compute_lfsr(
-            results,
-            gene_names=genes,
-            perturbation_names=perturbations,
-            lfsr_iters=lfsr_iters,
-            seed=seed,
-        )
-        _attach_lfsr(
-            tables,
-            lfsr_df,
-            gene_names=genes,
-            perturbation_names=perturbations,
-            lfsr_threshold=lfsr_threshold,
-        )
-    return tables
-
-
-def _read_saved_names(path: Path) -> tuple[Optional[list[str]], Optional[list[str]]]:
-    summary_path = path / "input_summary.json"
-    if not summary_path.is_file():
-        return None, None
-    try:
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Could not read name metadata from {summary_path}") from exc
-    if not isinstance(summary, dict):
-        raise ValueError(f"Name metadata in {summary_path} must be a JSON object")
-
-    values = []
-    for key in ("gene_names", "perturbation_names"):
-        names = summary.get(key)
-        if names is not None and not isinstance(names, list):
-            raise ValueError(f"{key} in {summary_path} must be a list or null")
-        values.append(names)
-    return values[0], values[1]
-
-
-def _analyze_saved_result(
-    path: str,
-    *,
-    gene_names: Optional[Sequence[str]] = None,
-    perturbation_names: Optional[Sequence[str]] = None,
-    **kwargs,
-) -> dict:
-    """Load saved results and delegate to the in-memory analysis core.
-
-    CLI name metadata is used when explicit names are omitted.
-    A pre-existing root ``lfsr.csv`` is reused without recomputation; a new LFSR
-    is calculated only when ``compute_lfsr=True`` is forwarded in ``kwargs``.
-    """
-    from .io import load_results
-
-    result_path = Path(path)
-    if gene_names is None or perturbation_names is None:
-        saved_genes, saved_perturbations = _read_saved_names(result_path)
-        if gene_names is None:
-            gene_names = saved_genes
-        if perturbation_names is None:
-            perturbation_names = saved_perturbations
-    tables = _analyze_result(
-        load_results(str(result_path)),
-        gene_names=gene_names,
-        perturbation_names=perturbation_names,
-        **kwargs,
-    )
-
-    if not kwargs.get("compute_lfsr", False) and (result_path / "lfsr.csv").is_file():
-        cached = pd.read_csv(result_path / "lfsr.csv", index_col=0)
-        genes = list(tables["pip"].index)
-        perturbations = list(tables["beta"].index)
-        _attach_lfsr(
-            tables,
-            cached,
-            gene_names=genes,
-            perturbation_names=perturbations,
-            lfsr_threshold=kwargs.get("lfsr_threshold", 0.05),
-        )
-    return tables
-
-
-def analyze(
-    results_or_path: InferResults | str | Path,
-    *,
-    gene_names: Optional[Sequence[str]] = None,
-    perturbation_names: Optional[Sequence[str]] = None,
-    pip_threshold: float = 0.9,
-    lfsr_threshold: float = 0.05,
-    compute_lfsr: bool = False,
-    lfsr_iters: int = 2000,
-    seed: int = 0,
-) -> dict:
-    """Analyze an in-memory fit or a saved result directory.
-
-    A CLI result path loads names from ``input_summary.json`` when present and
-    reuses an existing root ``lfsr.csv``. An :class:`InferResults` is analyzed
-    without I/O.
-
-    Args:
-        results_or_path: Fitted results or a directory written by
-            :func:`save_results`.
-        gene_names: Optional expression-feature labels overriding saved names.
-        perturbation_names: Optional perturbation labels overriding saved names.
-        pip_threshold: Inclusive lower PIP cutoff.
-        lfsr_threshold: Inclusive upper LFSR cutoff.
-        compute_lfsr: Compute LFSR instead of reusing a saved table.
-        lfsr_iters: Positive number of Monte Carlo iterations for LFSR.
-        seed: Random seed for LFSR.
-
-    Returns:
-        Labeled PIP, PVE, perturbation-effect, and optional LFSR DataFrames.
-    """
-    if isinstance(results_or_path, (str, Path)):
-        return _analyze_saved_result(
-            str(results_or_path),
-            gene_names=gene_names,
-            perturbation_names=perturbation_names,
-            pip_threshold=pip_threshold,
-            lfsr_threshold=lfsr_threshold,
-            compute_lfsr=compute_lfsr,
-            lfsr_iters=lfsr_iters,
-            seed=seed,
-        )
-
-    return _analyze_result(
-        results_or_path,
-        gene_names=gene_names,
-        perturbation_names=perturbation_names,
-        pip_threshold=pip_threshold,
-        lfsr_threshold=lfsr_threshold,
-        compute_lfsr=compute_lfsr,
-        lfsr_iters=lfsr_iters,
-        seed=seed,
-    )
+    return values
 
 
 def _compute_lfsr(
@@ -326,3 +40,78 @@ def _compute_lfsr(
 
     values = compute_lfsr(rdm.PRNGKey(seed), results.params, iters=lfsr_iters)
     return pd.DataFrame(np.asarray(values).T, index=gene_names, columns=perturbation_names)
+
+
+def _analyze(
+    results,
+    *,
+    gene_names: Optional[Sequence[str]],
+    perturbation_names: Optional[Sequence[str]],
+    compute_lfsr: bool,
+    lfsr_iters: int,
+    seed: int,
+) -> dict[str, pd.DataFrame]:
+    pip = np.asarray(results.pip)
+    pve = np.asarray(results.pve).reshape(-1)
+    W = np.asarray(results.params.W)
+    mean_beta = np.asarray(results.params.mean_beta)
+    p_hat = np.asarray(results.params.p_hat)
+
+    genes = _labels(gene_names, pip.shape[1], "gene_names")
+    perturbations = _labels(perturbation_names, mean_beta.shape[0], "perturbation_names")
+    factors = [f"factor_{index}" for index in range(pip.shape[0])]
+    perturbation_effect = mean_beta * p_hat.T
+
+    tables = {
+        "pip": pd.DataFrame(pip.T, index=genes, columns=factors),
+        "pve": pd.DataFrame({"pve": pve}, index=pd.Index(factors, name="factor")),
+        "perturbation_effect": pd.DataFrame(perturbation_effect, index=perturbations, columns=factors),
+        "perturbation_pip": pd.DataFrame(p_hat.T, index=perturbations, columns=factors),
+        "gene_effect": pd.DataFrame((perturbation_effect @ W).T, index=genes, columns=perturbations),
+    }
+    if compute_lfsr:
+        if isinstance(lfsr_iters, bool) or not isinstance(lfsr_iters, numbers.Integral) or lfsr_iters <= 0:
+            raise ValueError("lfsr_iters must be a positive integer")
+        if isinstance(seed, bool) or not isinstance(seed, numbers.Integral):
+            raise ValueError("seed must be an integer")
+        tables["lfsr"] = _compute_lfsr(
+            results,
+            gene_names=genes,
+            perturbation_names=perturbations,
+            lfsr_iters=lfsr_iters,
+            seed=seed,
+        )
+    return tables
+
+
+def analyze_output(
+    results_or_path: InferResults | FitResults | str | Path,
+    *,
+    gene_names: Optional[Sequence[str]] = None,
+    perturbation_names: Optional[Sequence[str]] = None,
+    compute_lfsr: bool = False,
+    lfsr_iters: int = 2000,
+    seed: int = 0,
+) -> dict[str, pd.DataFrame]:
+    """Create labeled result tables, optionally computing LFSR.
+
+    Paths are loaded with :func:`load_results`. This function does not write
+    files and never reads or computes LFSR unless ``compute_lfsr=True``.
+    """
+    if isinstance(results_or_path, (str, Path)):
+        from .io import load_results
+
+        results_or_path = load_results(results_or_path)
+    if isinstance(results_or_path, FitResults):
+        if gene_names is None:
+            gene_names = results_or_path.gene_names
+        if perturbation_names is None:
+            perturbation_names = results_or_path.perturbation_names
+    return _analyze(
+        results_or_path,
+        gene_names=gene_names,
+        perturbation_names=perturbation_names,
+        compute_lfsr=compute_lfsr,
+        lfsr_iters=lfsr_iters,
+        seed=seed,
+    )

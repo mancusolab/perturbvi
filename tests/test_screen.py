@@ -1,111 +1,132 @@
+from dataclasses import replace
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from jax.experimental import sparse as jax_sparse
 
-from perturbvi.screen import ScreenData, validate_screen
+from perturbvi import PerturbData
+from perturbvi.screen import validate_screen
 
 
-def _make_screen(n=12, p=20, g=3):
+def _make_data(n_cells=24, n_genes=40, n_perturbations=4):
     rng = np.random.default_rng(0)
-    X = rng.standard_normal((n, p))
-    G = np.zeros((n, g))
-    for row in range(n):
-        G[row, row % g] = 1.0
-    return ScreenData(X=X, G=G)
-
-
-def test_valid_screen_with_names():
-    original = _make_screen(n=9, p=20, g=3)
-    screen = original._replace(
-        gene_names=[f"gene_{index}" for index in range(20)],
-        perturbation_names=["pert_a", "pert_b", "pert_c"],
-        cell_names=[f"cell_{index}" for index in range(9)],
-        source={"format": "test"},
+    X = rng.normal(size=(n_cells, n_genes))
+    G = np.zeros((n_cells, n_perturbations))
+    G[np.arange(n_cells), np.arange(n_cells) % n_perturbations] = 1
+    return PerturbData(
+        X=X,
+        G=G,
+        gene_names=[f"gene_{index}" for index in range(n_genes)],
+        perturbation_names=[f"perturbation_{index}" for index in range(n_perturbations)],
     )
-    validate_screen(screen)
+
+
+def test_dataframe_inputs_infer_names_without_storing_cell_names():
+    cells = [f"cell_{index}" for index in range(6)]
+    X = pd.DataFrame(np.ones((6, 3)), index=cells, columns=["A", "B", "C"])
+    G = pd.DataFrame(
+        [[0, 0], [1, 0], [0, 1], [1, 1], [0, 0], [1, 0]],
+        index=cells,
+        columns=["guide_A", "guide_B"],
+    )
+
+    data = PerturbData(X=X, G=G)
+    validate_screen(data)
+
+    assert data.gene_names == ("A", "B", "C")
+    assert data.perturbation_names == ("guide_A", "guide_B")
+    assert not hasattr(data, "cell_names")
+
+
+def test_dataframe_row_order_must_match_when_indexes_are_available():
+    X = pd.DataFrame(np.ones((3, 2)), index=["c1", "c2", "c3"])
+    G = pd.DataFrame(np.ones((3, 1)), index=["c2", "c1", "c3"])
+    with pytest.raises(ValueError, match="row indexes"):
+        PerturbData(X=X, G=G)
 
 
 @pytest.mark.parametrize(
-    ("screen", "message"),
+    ("data", "message"),
     [
-        (ScreenData(X=np.ones(10), G=np.ones((10, 2))), "2D"),
-        (ScreenData(X=np.ones((10, 5)), G=np.ones(10)), "2D"),
-        (ScreenData(X=np.ones((10, 5)), G=np.ones((8, 2))), "rows"),
+        (PerturbData(X=np.ones(10), G=np.ones((10, 2))), "2D"),
+        (PerturbData(X=np.ones((10, 5)), G=np.ones(10)), "2D"),
+        (PerturbData(X=np.ones((10, 5)), G=np.ones((8, 2))), "rows"),
     ],
 )
-def test_invalid_dimensions_raise(screen, message):
+def test_matrix_dimensions_are_core_invariants(data, message):
     with pytest.raises(ValueError, match=message):
-        validate_screen(screen)
+        validate_screen(data)
 
 
-@pytest.mark.parametrize("nonfinite", [np.nan, np.inf])
-def test_nonfinite_x_raises(nonfinite):
-    screen = _make_screen()._replace(X=np.ones((12, 20)))
-    values = np.asarray(screen.X).copy()
-    values[0, 0] = nonfinite
+@pytest.mark.parametrize("value", [np.nan, np.inf])
+def test_expression_must_be_finite(value):
+    data = _make_data()
+    X = np.asarray(data.X).copy()
+    X[0, 0] = value
     with pytest.raises(ValueError, match="non-finite"):
-        validate_screen(screen._replace(X=values))
+        validate_screen(replace(data, X=X))
 
 
-def test_nonfinite_g_raises():
-    screen = _make_screen()
-    guides = np.asarray(screen.G).copy()
-    guides[0, 0] = np.nan
-    with pytest.raises(ValueError, match="G contains non-finite"):
-        validate_screen(screen._replace(G=guides))
+@pytest.mark.parametrize("value", [np.nan, 0.5, -1, 2])
+def test_perturbation_design_must_be_finite_and_binary(value):
+    data = _make_data()
+    G = np.asarray(data.G).copy()
+    G[0, 0] = value
+    with pytest.raises(ValueError, match="non-finite|binary"):
+        validate_screen(replace(data, G=G))
 
 
-def test_empty_g_column_raises():
-    screen = _make_screen()
-    guides = np.column_stack([screen.G, np.zeros(screen.G.shape[0])])
-    with pytest.raises(ValueError, match="all-zero"):
-        validate_screen(screen._replace(G=guides))
+def test_all_zero_rows_are_valid_but_all_zero_columns_are_not():
+    data = _make_data()
+    G = np.asarray(data.G).copy()
+    G[:3] = 0
+    validate_screen(replace(data, G=G))
+
+    G[:, 0] = 0
+    with pytest.raises(ValueError, match="all-zero columns"):
+        validate_screen(replace(data, G=G))
 
 
-def test_zero_column_g_shape_raises():
-    screen = _make_screen()
-    with pytest.raises(ValueError, match="at least one perturbation"):
-        validate_screen(screen._replace(G=np.empty((12, 0)), perturbation_names=[]))
-
-
-def test_name_dimension_mismatches_raise():
-    screen = _make_screen()
+def test_names_are_required_unique_and_dimensioned():
+    data = _make_data()
     with pytest.raises(ValueError, match="gene_names"):
-        validate_screen(screen._replace(gene_names=["g"] * 5))
-    with pytest.raises(ValueError, match="perturbation_names"):
-        validate_screen(screen._replace(perturbation_names=["p1", "p2"]))
-    with pytest.raises(ValueError, match="cell_names"):
-        validate_screen(screen._replace(cell_names=["cell"] * 5))
+        validate_screen(replace(data, gene_names=None))
+    with pytest.raises(ValueError, match="duplicate"):
+        validate_screen(replace(data, perturbation_names=["same"] * data.G.shape[1]))
 
 
-def test_validate_screen_accepts_bcsr_without_materializing():
-    screen = _make_screen()
-    sparse_screen = screen._replace(
-        X=jax_sparse.BCSR.fromdense(screen.X),
-        G=jax_sparse.BCSR.fromdense(screen.G),
+def test_sparse_bcsr_is_valid_without_materializing_the_full_matrix():
+    data = _make_data(n_cells=128, n_genes=512, n_perturbations=16)
+    sparse_data = replace(
+        data,
+        X=jax_sparse.BCSR.fromdense(data.X),
+        G=jax_sparse.BCSR.fromdense(data.G),
     )
-    validate_screen(sparse_screen)
+    validate_screen(sparse_data)
 
 
-def test_validate_screen_rejects_nonmapping_source():
-    screen = _make_screen()._replace(source="not metadata")
-    with pytest.raises(ValueError, match="source must be a mapping"):
-        validate_screen(screen)
-
-
-def test_missing_categorical_covariate_raises():
-    screen = _make_screen()._replace(
-        covariates=np.array([["A"]] * 11 + [[None]], dtype=object),
-        covariate_names=["batch"],
+def test_covariates_accept_numeric_boolean_category_and_string_columns():
+    data = _make_data()
+    n = data.X.shape[0]
+    covariates = pd.DataFrame(
+        {
+            "depth": np.linspace(1, 2, n),
+            "passed_qc": np.resize([True, False], n),
+            "batch": pd.Categorical(np.resize(["A", "B"], n)),
+            "donor": np.resize(["D1", "D2", "D3"], n),
+        }
     )
-    with pytest.raises(ValueError, match="missing values"):
-        validate_screen(screen)
+    validate_screen(replace(data, covariates=covariates))
 
 
-def test_nonfinite_numeric_covariate_raises():
-    values = np.arange(12, dtype=float).reshape(-1, 1)
-    values[4, 0] = np.inf
-    screen = _make_screen()._replace(covariates=values, covariate_names=["depth"])
+def test_covariates_reject_only_broken_alignment_or_values():
+    data = _make_data()
+    with pytest.raises(ValueError, match="rows"):
+        validate_screen(replace(data, covariates=pd.DataFrame({"x": [1, 2]})))
+
+    values = np.arange(data.X.shape[0], dtype=float)
+    values[3] = np.inf
     with pytest.raises(ValueError, match="non-finite"):
-        validate_screen(screen)
+        validate_screen(replace(data, covariates=pd.DataFrame({"depth": values})))

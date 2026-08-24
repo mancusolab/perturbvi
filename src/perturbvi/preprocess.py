@@ -1,147 +1,148 @@
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from dataclasses import replace
+from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-from .screen import matrix_to_numpy, ScreenData, validate_screen
+from scipy import sparse as scipy_sparse
+from scipy.linalg import qr as scipy_qr
+
+from jax.experimental import sparse as jax_sparse
+
+from ._defaults import DEFAULT_BLOCK_SIZE
+from .log import get_logger
+from .screen import PerturbData, validate_screen
 
 
-def _build_design_matrix(
-    covariates: np.ndarray,
-    covariate_names: Sequence[str],
-    categorical_covariates: Optional[Sequence[str]] = None,
-) -> np.ndarray:
-    """Build an intercept plus centered numeric and reference-coded categorical columns."""
-    covariates = np.asarray(covariates)
-    names = list(covariate_names)
-    cat_names = list(categorical_covariates or [])
-    cat_set = set(cat_names)
+log = get_logger(__name__)
 
-    if covariates.ndim != 2:
-        raise ValueError(f"covariates must be 2D; got shape {covariates.shape}")
-    if covariates.shape[1] != len(names):
-        raise ValueError(
-            f"covariate_names has {len(names)} entries but covariates has {covariates.shape[1]} columns"
-        )
-    unknown = [name for name in cat_names if name not in names]
-    if unknown:
-        raise ValueError(f"categorical_covariates {unknown} not found in covariate_names: {names}")
-    if np.asarray(pd.isna(covariates), dtype=bool).any():
-        raise ValueError("Covariates contain missing values")
 
-    columns = [np.ones((covariates.shape[0], 1), dtype=np.float64)]
-    for index, name in enumerate(names):
-        column = covariates[:, index]
-        if name in cat_set:
-            levels = list(pd.unique(column))
+def _build_design_matrix_with_names(covariates: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
+    """Build an intercept plus centered numeric and categorical columns."""
+    if not isinstance(covariates, pd.DataFrame):
+        raise ValueError("covariates must be a pandas DataFrame")
+    if covariates.empty:
+        raise ValueError("covariates must contain rows and columns")
+
+    columns = [np.ones((len(covariates), 1), dtype=np.float64)]
+    names = ["intercept"]
+    for name in covariates:
+        series = covariates[name]
+        if series.isna().any():
+            raise ValueError(f"Covariate '{name}' contains missing values")
+        if not pd.api.types.is_numeric_dtype(series.dtype) or pd.api.types.is_bool_dtype(series.dtype):
+            levels = list(pd.unique(series))
             for level in levels[1:]:
-                columns.append((column == level).astype(np.float64).reshape(-1, 1))
+                columns.append((series.to_numpy() == level).astype(np.float64).reshape(-1, 1))
+                names.append(f"{name}={level}")
             continue
 
-        try:
-            numeric = column.astype(np.float64)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"Covariate '{name}' is not numeric; include it in categorical_covariates"
-            ) from exc
+        numeric = series.to_numpy(dtype=np.float64)
         if not np.all(np.isfinite(numeric)):
             raise ValueError(f"Covariate '{name}' contains non-finite values")
-        columns.append((numeric - numeric.mean()).reshape(-1, 1))
+        centered = numeric - numeric.mean()
+        if np.any(centered):
+            columns.append(centered.reshape(-1, 1))
+            names.append(str(name))
 
     design = np.hstack(columns)
     if not np.all(np.isfinite(design)):
         raise ValueError("Design matrix contains non-finite values after encoding")
-    return design
+    return design, names
 
 
-def _least_squares_residualize(X: np.ndarray, C: np.ndarray) -> np.ndarray:
-    """Residualize with an SVD-backed, rank-aware least-squares solve."""
-    coefficients, _, _, _ = np.linalg.lstsq(C, X, rcond=None)
-    return X - C @ coefficients
+def _projection_basis(C: np.ndarray, names: list[str]) -> np.ndarray:
+    """Return a float32 orthonormal basis using a float64 rank-aware SVD."""
+    scaled = C.astype(np.float64, copy=True)
+    if scaled.shape[1] > 1:
+        scales = np.std(scaled[:, 1:], axis=0)
+        scales[scales == 0] = 1.0
+        scaled[:, 1:] /= scales
+
+    U, singular_values, _ = np.linalg.svd(scaled, full_matrices=False)
+    tolerance = np.finfo(np.float64).eps * max(scaled.shape) * singular_values[0]
+    rank = int(np.count_nonzero(singular_values > tolerance))
+    if rank < len(names):
+        _, _, pivot = scipy_qr(scaled, mode="economic", pivoting=True)
+        log.warning(
+            "Covariate design is rank-deficient; dropped design directions: %s",
+            ", ".join(names[index] for index in pivot[rank:]),
+        )
+    return U[:, :rank].astype(np.float32)
+
+
+def _as_csc(value):
+    """Convert sparse input once so column-block reads are efficient."""
+    if scipy_sparse.issparse(value):
+        return value.astype(np.float32, copy=False).tocsc()
+    if isinstance(value, jax_sparse.BCSR):
+        indptr = np.asarray(value.indptr)
+        indices = np.column_stack(
+            [
+                np.repeat(np.arange(value.shape[0]), np.diff(indptr)),
+                np.asarray(value.indices).reshape(-1),
+            ]
+        )
+        data = np.asarray(value.data).reshape(-1).astype(np.float32, copy=False)
+    elif isinstance(value, jax_sparse.BCOO):
+        indices = np.asarray(value.indices)
+        data = np.asarray(value.data).reshape(-1).astype(np.float32, copy=False)
+    else:
+        return None
+    return scipy_sparse.csc_matrix(
+        (data, (indices[:, 0], indices[:, 1])),
+        shape=value.shape,
+    )
 
 
 def residualize_screen(
-    screen: ScreenData,
+    screen: PerturbData,
     *,
-    covariates: Optional[Sequence[str]] = None,
-    categorical_covariates: Optional[Sequence[str]] = None,
-) -> ScreenData:
-    """Regress selected covariates out of every expression feature.
+    block_size: int = DEFAULT_BLOCK_SIZE,
+    output: Optional[Path] = None,
+) -> PerturbData:
+    """Regress selected covariates out of expression in gene blocks.
 
-    Numeric covariates are centered, categorical covariates use reference-level
-    one-hot coding, and an intercept is included. An SVD-backed least-squares
-    solve handles rank-deficient designs predictably. This explicitly dense
-    operation preserves cell order, records its choices in ``screen.source``,
-    and removes only the consumed columns from the returned covariate matrix.
-
-    Args:
-        screen: A validated screen loaded with covariates.
-        covariates: Covariate names to use. All loaded covariates are used when
-            omitted.
-        categorical_covariates: Selected covariates to encode as categorical.
-    Returns:
-        A new screen containing dense residualized expression and any
-        covariates that were loaded but not selected.
+    ``block_size`` bounds peak memory (genes per projection chunk) and defaults
+    to :data:`perturbvi._defaults.DEFAULT_BLOCK_SIZE`. Output is float32.
     """
     validate_screen(screen)
     if screen.covariates is None:
-        raise ValueError(
-            "screen.covariates is None. Load the screen with covariates=['col1', ...] first."
-        )
-    if screen.covariate_names is None:
-        raise ValueError("screen.covariate_names is required for residualization")
+        raise ValueError("screen.covariates is None. Load the screen with covariates=[...] first.")
 
-    all_names = list(screen.covariate_names)
-    selected = list(covariates) if covariates is not None else all_names
-    if not selected:
-        raise ValueError("At least one covariate must be selected for residualization")
-    unknown = [name for name in selected if name not in all_names]
-    if unknown:
-        raise ValueError(f"covariates {unknown} not found in covariate_names: {all_names}")
+    if block_size <= 0:
+        raise ValueError("block_size must be positive")
 
-    cat_names = list(categorical_covariates or [])
-    unknown_cat = [name for name in cat_names if name not in all_names]
-    if unknown_cat:
-        raise ValueError(
-            f"categorical_covariates {unknown_cat} not found in covariate_names: {all_names}"
-        )
-    unselected_cat = [name for name in cat_names if name not in selected]
-    if unselected_cat:
-        raise ValueError(
-            f"categorical_covariates {unselected_cat} are not selected covariates: {selected}"
+    design, design_names = _build_design_matrix_with_names(screen.covariates)
+    basis = _projection_basis(design, design_names)
+    n_cells, n_genes = screen.X.shape
+    sparse_x = _as_csc(screen.X)
+    dense_x = None if sparse_x is not None else np.asarray(screen.X, dtype=np.float32)
+    if output is None:
+        X_resid = np.empty((n_cells, n_genes), dtype=np.float32, order="C")
+    else:
+        X_resid = np.memmap(
+            Path(output),
+            mode="w+",
+            dtype=np.float32,
+            shape=(n_cells, n_genes),
+            order="F",
         )
 
-    selected_idx = [all_names.index(name) for name in selected]
-    selected_values = np.asarray(screen.covariates)[:, selected_idx]
-    design = _build_design_matrix(
-        selected_values,
-        selected,
-        categorical_covariates=cat_names,
-    )
-    if np.linalg.matrix_rank(design) <= 1:
-        raise ValueError("Covariate design must contain at least one non-intercept direction")
+    for start in range(0, n_genes, block_size):
+        stop = min(start + block_size, n_genes)
+        if sparse_x is not None:
+            block = sparse_x[:, start:stop].toarray()
+        else:
+            block = dense_x[:, start:stop]
+        block = np.asarray(block, dtype=np.float32)
+        X_resid[:, start:stop] = block - basis @ (basis.T @ block)
+    if isinstance(X_resid, np.memmap):
+        X_resid.flush()
+    return replace(screen, X=X_resid, covariates=None)
 
-    X_resid = _least_squares_residualize(
-        matrix_to_numpy(screen.X, dtype=np.float64),
-        design,
-    )
-    source = dict(screen.source)
-    source.update(
-        {
-            "residualized": True,
-            "residualized_covariate_names": selected,
-            "residualized_categorical_covariates": cat_names,
-            "residualization_method": "rank-aware least squares",
-        }
-    )
-    keep_idx = [index for index, name in enumerate(all_names) if name not in selected]
-    kept_covars = np.asarray(screen.covariates)[:, keep_idx] if keep_idx else None
-    kept_names = [all_names[index] for index in keep_idx] or None
-    return screen._replace(
-        X=X_resid,
-        covariates=kept_covars,
-        covariate_names=kept_names,
-        source=source,
-    )
+
+__all__ = ["residualize_screen"]

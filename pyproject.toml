@@ -34,13 +34,10 @@ dependencies = [
     "optimistix",
     "optax",
     "plum-dispatch",
+    "anndata",
     "pandas",
     "numpy",
     "scipy",
-    "scanpy",
-    "matplotlib",
-    "seaborn",
-    "adjustText",
 ]
 
 [project.scripts]
@@ -66,6 +63,7 @@ dependencies = [
     "coverage[toml]",
     "pytest",
     "pytest-cov",
+    "scanpy",  # used only to execute the cookbook preprocessing example
 ]
 
 [tool.hatch.envs.test.scripts]

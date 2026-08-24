@@ -1,9 +1,7 @@
 # pattern: Functional Core
 
-import logging
 import numbers
 
-from datetime import datetime
 from functools import partial
 
 import numpy as np
@@ -15,12 +13,12 @@ import lineax as lx
 from jax import jit, lax, numpy as jnp, random as rdm
 from jaxtyping import Array
 
+from .analysis import analyze_output as analyze  # noqa: F401
 from .common import ModelParams
 from .log import get_logger
 
 
-log = get_logger("perturbvi")
-log.setLevel(logging.INFO)
+log = get_logger(__name__)
 
 multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
 
@@ -217,8 +215,7 @@ def compute_lfsr(key: Array, params: ModelParams, iters: int = 2000) -> Array:
     if isinstance(iters, bool) or not isinstance(iters, numbers.Integral) or iters <= 0:
         raise ValueError(f"iters must be a positive integer; received {iters!r}")
 
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log.info(f"Start computing LFSR at {current_time}")
+    log.info("Start computing LFSR")
 
     # Split computation into chunks to show progress
     chunk_size = 100
@@ -246,7 +243,6 @@ def compute_lfsr(key: Array, params: ModelParams, iters: int = 2000) -> Array:
     # Compute final LFSR
     lfsr = jnp.minimum(total_pos, total_neg) / iters
 
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log.info(f"Finished computing LFSR at {current_time}")
+    log.info("Finished computing LFSR")
 
     return lfsr
