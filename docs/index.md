@@ -16,48 +16,22 @@ uv pip install perturbvi
 
 ## Quick start
 
-`PerturbData` keeps expression, genetic perturbations, and covariates aligned:
+### From AnnData (recommended)
 
-| Argument | Shape | Contents |
-|---|---|---|
-| `X` | cells × genes | Normalized, scaled, or transformed expression |
-| `G` | cells × perturbations | Binary guide or target assignments |
-| `covariates` | cells × covariates | Variables whose effects should be removed from expression |
-
-`X` and `G` are required. Include covariates when their effects should be
-removed before the model is fit.
+Prepare the file with transformed expression in `adata.X` and the binary
+perturbation matrix in `adata.obsm["G"]`, then load and fit:
 
 ```python
-from perturbvi import PerturbData, fit_screen, residualize_screen
+from perturbvi import fit_screen, load_screen, residualize_screen
 
-# expression, G, and covariates are aligned tables prepared as described below.
-data = PerturbData(
-    X=expression,
-    G=G,
-    covariates=covariates,
-)
-data = residualize_screen(data)
+data = load_screen("screen.h5ad")  # control=None (default): G has no reference column
+data = load_screen("screen.h5ad", control="Nontargeting")  # G keeps its reference column
+
+data = residualize_screen(data)  # optional; only if you loaded covariates
 fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
 ```
 
-All inputs must describe the same cells in the same row order. `PerturbData`
-checks DataFrame row alignment immediately; the remaining shape, name, missing
-value, and binary `G` checks run before fitting. `residualize_screen()` removes
-the supplied covariate effects once; the resulting data can be reused for
-multiple fits. `fit_screen()` then centers expression; pass
-`standardize=True` to also scale each gene to unit variance.
-
-See the [Workflow](workflow.md) for complete input and analysis guidance and
-the [Input structure](input_structure.md) for where each piece of a screen
-lives in an AnnData file. The [Cookbook](cookbook.md#3-real-genetic-screens)
-covers real Datlinger, Norman, and Adamson screens.
-
-## AnnData and CLI
-
-For AnnData, `load_screen()` reads transformed expression from `adata.X` and
-combines it with the binary `G` matrix stored in the file at `obsm["G"]` (key
-selectable via `g_key=`). Prepare the file with `adata.obsm["G"]` set to a
-named DataFrame of binary columns, then fit:
+Same workflow from the CLI:
 
 ```bash
 perturbvi fit screen.h5ad \
@@ -65,14 +39,41 @@ perturbvi fit screen.h5ad \
   --z-dim 12 --l-dim 400 --tau 50
 ```
 
-If `G` includes the reference column, pass `--control control`; the loader
-drops it before fitting.
-
-Create result tables after fitting:
+Omit `--control` when `G` is baseline-free; add `--control Nontargeting` when
+`G` keeps its reference column.
 
 ```bash
 perturbvi analyze results
 ```
+
+### Already have `X` and `G`? (arrays or CSV)
+
+`PerturbData` keeps expression, perturbations, and covariates aligned:
+
+| Argument | Shape | Contents |
+|---|---|---|
+| `X` | cells × genes | Normalized, scaled, or transformed expression |
+| `G` | cells × perturbations | Binary guide or target assignments |
+| `covariates` | cells × covariates | Variables whose effects should be removed from expression |
+
+```python
+from perturbvi import PerturbData, fit_screen, residualize_screen
+
+data = PerturbData(X=expression, G=G, covariates=covariates)
+data = residualize_screen(data)  # optional
+fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
+```
+
+`X` and `G` are required and must list the same cells in the same row order.
+Read CSV/TSV with pandas first, then pass the DataFrames. `fit_screen()`
+centers expression; pass `standardize=True` to also scale each gene to unit
+variance.
+
+See the [Workflow](workflow.md) for complete input and analysis guidance and
+the [Input structure](input_structure.md) for where each piece of a screen
+lives in an AnnData file. The [Cookbook](cookbook.md#3-real-genetic-screens)
+covers real Datlinger, Norman, and Adamson screens.
+
 
 ## Read next
 
