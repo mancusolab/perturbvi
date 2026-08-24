@@ -54,6 +54,7 @@ perturbvi analyze results
 | `X` | cells × genes | Normalized, scaled, or transformed expression |
 | `G` | cells × perturbations | Binary guide or target assignments |
 | `covariates` | cells × covariates | Variables whose effects should be removed from expression |
+| `control` | label | Reference column to drop from `G` (default: none) |
 
 ```python
 from perturbvi import PerturbData, fit_screen, residualize_screen

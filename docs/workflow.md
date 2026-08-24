@@ -30,6 +30,7 @@ The high-level input is `PerturbData`:
 | `X` | cells × genes | Transformed expression |
 | `G` | cells × perturbations | Binary guide or target assignments |
 | `covariates` | cells × covariates | Variables whose effects will be removed from expression |
+| `control` | label | Reference column to drop from `G` (default: none) |
 
 `X` and `G` are required. Covariates are included when the analysis calls for
 them. Every input must describe the same cells in the same row order.
