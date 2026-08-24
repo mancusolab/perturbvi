@@ -1,7 +1,5 @@
 from typing import NamedTuple, Optional
 
-import numpy as np
-
 import jax.numpy as jnp
 
 from jax import random
@@ -39,7 +37,7 @@ def create_design_matrix(key, n_dim, g_dim):
     """Create a design matrix given N and G
 
     Args:
-    key : Random seed for np.random.
+    key : JAX PRNG key used to assign the remaining cells.
     n_dim : Sample size
     g_dim : Perturbation dimension
 
@@ -52,14 +50,68 @@ def create_design_matrix(key, n_dim, g_dim):
     # Assign each perturbation exactly once
     G = jnp.identity(g_dim)
 
-    # Randomly assign remaining perturbations
-    np.random.seed(key)
-    indices = np.random.choice(g_dim, size=n_dim - g_dim)
-    G_left = np.zeros((n_dim - g_dim, g_dim), dtype=int)
-    G_left[np.arange(n_dim - g_dim), indices] = 1
+    # Randomly assign remaining perturbations using the caller's JAX key
+    indices = random.choice(key, g_dim, shape=(n_dim - g_dim,), replace=True)
+    G_left = jnp.zeros((n_dim - g_dim, g_dim), dtype=int)
+    G_left = G_left.at[jnp.arange(n_dim - g_dim), indices].set(1)
 
     G = jnp.concatenate((G, G_left), axis=0)
     return G
+
+
+def _validate_sim_inputs(seed, l_dim, n_dim, p_dim, z_dim, g_dim, b_sparsity, effect_size):
+    """Reject invalid simulation arguments before any arithmetic or allocation."""
+    if isinstance(seed, int) is False:
+        raise ValueError(f"seed should be an interger: received seed = {seed}")
+
+    for name, value in (("n_dim", n_dim), ("p_dim", p_dim), ("z_dim", z_dim), ("g_dim", g_dim)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} should be a positive integer: received {name} = {value}")
+
+    if isinstance(l_dim, bool) or not isinstance(l_dim, int) or l_dim <= 0:
+        raise ValueError(f"l_dim should be positive: received l_dim = {l_dim}")
+
+    # Integer form of the old "l_dim < p_dim / z_dim" rule; safe for z_dim = 0
+    # because positivity is already enforced above.
+    if l_dim * z_dim > p_dim:
+        raise ValueError(
+            f"l_dim should be less than p_dim/z_dim: received l_dim = {l_dim}, "
+            f"z_dim = {z_dim}, p_dim = {p_dim}"
+        )
+
+    if g_dim > n_dim:
+        raise ValueError(f"g_dim should be less than n: received g_dim = {g_dim}, n = {n_dim}")
+
+    if not 0 <= b_sparsity <= 1:
+        raise ValueError(f"b_sparsity should be between 0 and 1: received b_sparsity = {b_sparsity}")
+
+    if effect_size <= 0:
+        raise ValueError(f"effect size should be positive: received effect_size = {effect_size}")
+
+
+def _random_loadings(key, z_dim, p_dim, l_dim, effect_size):
+    """Build the block-sparse loading matrix W from the given key."""
+    W = jnp.zeros(shape=(z_dim, p_dim))
+    loading_values = effect_size * random.normal(key, shape=(z_dim, l_dim))
+
+    for k in range(z_dim):
+        W = W.at[k, (k * l_dim) : ((k + 1) * l_dim)].set(loading_values[k])
+
+    return W
+
+
+def _random_beta(key, z_dim, g_dim, non_zero_num):
+    """Build the sparse perturbation effect matrix beta from the given key."""
+    beta = jnp.zeros(shape=(g_dim, z_dim))
+
+    for col in range(z_dim):
+        key, subkey = random.split(key)
+        # Select `non_zero_num` rows without replacement, then fill their values.
+        indices = random.choice(key, g_dim, shape=(non_zero_num,), replace=False)
+        values = random.normal(subkey, (non_zero_num,))
+        beta = beta.at[indices, col].set(values)
+
+    return beta
 
 
 def generate_sim(
@@ -72,7 +124,7 @@ def generate_sim(
     b_sparsity: float = 0.2,
     effect_size: float = 1.0,
 ) -> SimulatedData:
-    """Create the function to generate a sparse data for perturbVI.
+    """Create the function to generate a sparse data for PerturbVI.
        Please make sure l_dim < p_dim/z_dim
        when generate simulation data using this function.
 
@@ -91,57 +143,13 @@ def generate_sim(
         SimulatedData: Tuple that contains simulated factors (`N x K`),
     """
 
-    # interger seed
-    if isinstance(seed, int) is False:
-        raise ValueError(f"seed should be an interger: received seed = {seed}")
+    _validate_sim_inputs(seed, l_dim, n_dim, p_dim, z_dim, g_dim, b_sparsity, effect_size)
 
     rng_key = random.PRNGKey(seed)
     rng_key, b_key, beta_key, s_key, var_key, obs_key = random.split(rng_key, 6)
 
-    # dimension check
-    if l_dim > p_dim:
-        raise ValueError(f"l_dim should be less than p: received l_dim = {l_dim}, p = {p_dim}")
-    if l_dim > p_dim / z_dim:
-        raise ValueError(
-            f"""l_dim is smaller than p_dim/z_dim,
-            please make sure each component has {l_dim} single effects"""
-        )
-
-    if l_dim <= 0:
-        raise ValueError(f"l_dim should be positive: received l_dim = {l_dim}")
-
-    if z_dim > p_dim:
-        raise ValueError(f"z_dim should be less than p: received z_dim = {z_dim}, p = {p_dim}")
-    if z_dim > n_dim:
-        raise ValueError(f"z_dim should be less than n: received z_dim = {z_dim}, n = {n_dim}")
-    if z_dim <= 0:
-        raise ValueError(f"z_dim should be positive: received z_dim = {z_dim}")
-
-    if effect_size <= 0:
-        raise ValueError(f"effect size should be positive: received effect_size = {effect_size}")
-
-    # random W
-    W = jnp.zeros(shape=(z_dim, p_dim))
-
-    for k in range(z_dim):
-        W = W.at[k, (k * l_dim) : ((k + 1) * l_dim)].set(effect_size * random.normal(b_key, shape=(l_dim,)))
-
-    # linear function to generate Z
-    # perturbation effects
-    beta = jnp.zeros(shape=(g_dim, z_dim))
-    # number of non-zero entries in each component
-    non_zero_num = int(b_sparsity * g_dim)
-
-    for col in range(z_dim):
-        beta_key, beta_key_2 = random.split(beta_key)
-        # Step 2: Randomly select `non_zero_num` indices without replacement
-        indices = random.choice(beta_key, g_dim, shape=(non_zero_num,), replace=False)
-
-        # Step 3: Generate `non_zero_num` random values from a normal distribution
-        random_values = random.normal(beta_key_2, (non_zero_num,))
-
-        # Update the selected entries in the column with random values
-        beta = beta.at[indices, col].set(random_values)
+    W = _random_loadings(b_key, z_dim, p_dim, l_dim, effect_size)
+    beta = _random_beta(beta_key, z_dim, g_dim, int(b_sparsity * g_dim))
 
     G = create_design_matrix(s_key, n_dim, g_dim)
 
@@ -164,7 +172,7 @@ def generate_sim_with_control(
     b_sparsity: float = 0.2,
     effect_size: float = 1.0,
 ) -> SimulatedData:
-    """Create the function to generate a sparse data for perturbVI.
+    """Create the function to generate a sparse data for PerturbVI.
        Please make sure l_dim < p_dim/z_dim
        when generate simulation data using this function.
 
@@ -184,72 +192,35 @@ def generate_sim_with_control(
         SimulatedData: Tuple that contains simulated factors (`N x K`),
     """
 
-    # interger seed
-    if isinstance(seed, int) is False:
-        raise ValueError(f"seed should be an interger: received seed = {seed}")
+    _validate_sim_inputs(seed, l_dim, n_dim, p_dim, z_dim, g_dim, b_sparsity, effect_size)
 
-    rng_key = random.PRNGKey(seed)
-    rng_key, b_key, beta_key, s_key, var_key, obs_key, beta_key_2 = random.split(rng_key, 7)
+    if not 0 <= control_fraction < 1:
+        raise ValueError(f"control_fraction should be between 0 and 1: received {control_fraction}")
 
-    # dimension check
-    if l_dim > p_dim:
-        raise ValueError(f"l_dim should be less than p: received l_dim = {l_dim}, p = {p_dim}")
-    if l_dim > p_dim / z_dim:
+    # Split the requested total sample count into perturbed and control cells.
+    control_size = int(n_dim * control_fraction)
+    case_size = n_dim - control_size
+    if case_size < g_dim:
         raise ValueError(
-            f"""l_dim is smaller than p_dim/z_dim,
-            please make sure each component has {l_dim} single effects"""
+            f"Not enough perturbed cells to assign every perturbation: "
+            f"received {case_size} perturbed cells and g_dim = {g_dim}"
         )
 
-    if l_dim <= 0:
-        raise ValueError(f"l_dim should be positive: received l_dim = {l_dim}")
+    rng_key = random.PRNGKey(seed)
+    rng_key, b_key, beta_key, s_key, var_key, obs_key = random.split(rng_key, 6)
 
-    if z_dim > p_dim:
-        raise ValueError(f"z_dim should be less than p: received z_dim = {z_dim}, p = {p_dim}")
-    if z_dim > n_dim:
-        raise ValueError(f"z_dim should be less than n: received z_dim = {z_dim}, n = {n_dim}")
-    if z_dim <= 0:
-        raise ValueError(f"z_dim should be positive: received z_dim = {z_dim}")
+    W = _random_loadings(b_key, z_dim, p_dim, l_dim, effect_size)
+    beta = _random_beta(beta_key, z_dim, g_dim, int(b_sparsity * g_dim))
 
-    if effect_size <= 0:
-        raise ValueError(f"effect size should be positive: received effect_size = {effect_size}")
+    # Negative-control cells have no perturbation assignment and therefore use
+    # all-zero guide rows. G columns remain aligned one-to-one with beta rows.
+    G_case = create_design_matrix(s_key, case_size, g_dim)
+    G_control = jnp.zeros(shape=(control_size, g_dim))
+    G = jnp.vstack((G_case, G_control))
 
-    # control data
-    control_size = int(n_dim * control_fraction)
-
-    # random W
-    W = jnp.zeros(shape=(z_dim, p_dim))
-
-    for k in range(z_dim):
-        W = W.at[k, (k * l_dim) : ((k + 1) * l_dim)].set(effect_size * random.normal(b_key, shape=(l_dim,)))
-
-    # linear function to generate Z
-    # perturbation effects
-    beta = jnp.zeros(shape=(g_dim, z_dim))
-    # effects should be sparse
-    non_zero_num = int(b_sparsity * g_dim)
-
-    for col in range(z_dim):
-        beta_key, beta_key_2 = random.split(beta_key)
-        # Step 2: Randomly select `non_zero_num` indices without replacement
-        indices = random.choice(beta_key, g_dim, shape=(non_zero_num,), replace=False)
-
-        # Step 3: Generate `non_zero_num` random values from a normal distribution
-        random_values = random.normal(beta_key_2, (non_zero_num,))
-
-        # Update the selected entries in the column with random values
-        beta = beta.at[indices, col].set(random_values)
-
-    # compose new G with control cell
-    G_case = create_design_matrix(s_key, n_dim, g_dim)
-    G_add_zero_col = jnp.insert(G_case, 0, values=0, axis=1)
-    G_control = jnp.hstack((jnp.zeros(shape=(control_size, g_dim)), jnp.ones(shape=(control_size, 1))))
-    G = jnp.vstack((G_add_zero_col, G_control))
-    beta_add = jnp.vstack((beta, 0.5 * random.normal(beta_key_2, shape=(1, z_dim))))
-    # beta_add_zero_row = jnp.insert(beta, beta.shape[0], values=0, axis=0)
-
-    Z = G @ beta_add + random.normal(var_key, shape=(n_dim + control_size, z_dim))
+    Z = G @ beta + random.normal(var_key, shape=(n_dim, z_dim))
     # Latent factor model
     m = Z @ W
-    X = m + random.normal(obs_key, shape=(n_dim + control_size, p_dim))
+    X = m + random.normal(obs_key, shape=(n_dim, p_dim))
 
-    return SimulatedData(Z, W, X, G, beta_add)
+    return SimulatedData(Z, W, X, G, beta)

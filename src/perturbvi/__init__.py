@@ -1,17 +1,32 @@
 from importlib.metadata import PackageNotFoundError, version  # pragma: no cover
 
-# annoying lint bug...
 from .infer import (
     compute_elbo as compute_elbo,
     compute_pip as compute_pip,
     compute_pve as compute_pve,
     infer as infer,
 )
-from .io import save_results as save_results
+from .io import load_results as load_results, save_results as save_results
+from .loaders import load_screen as load_screen
+from .preprocess import residualize_screen as residualize_screen
+from .screen import fit_screen as fit_screen, FitResults as FitResults, PerturbData as PerturbData
 from .sim import generate_sim as generate_sim
-from .utils import (
-    analyze_output as analyze_output,
-    compute_lfsr as compute_lfsr,
+
+
+__all__ = (
+    "FitResults",
+    "PerturbData",
+    "__version__",
+    "compute_elbo",
+    "compute_pip",
+    "compute_pve",
+    "fit_screen",
+    "generate_sim",
+    "infer",
+    "load_results",
+    "load_screen",
+    "residualize_screen",
+    "save_results",
 )
 
 
@@ -22,4 +37,4 @@ try:
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "unknown"
 finally:
-    del version, PackageNotFoundError
+    del version, PackageNotFoundError, dist_name

@@ -1,8 +1,7 @@
 import ast
 import inspect
 
-from griffe import Class, Docstring, dynamic_import, Extension, Function, get_logger, Object, ObjectNode
-from griffe.dataclasses import Parameter
+from griffe import Class, Docstring, dynamic_import, Extension, Function, get_logger, Object, ObjectNode, Parameter
 
 
 logger = get_logger(__name__)
@@ -33,7 +32,7 @@ class DynamicDocstrings(Extension):
     def __init__(self, paths: list[str] | None = None) -> None:
         self.module_paths = paths
 
-    def on_class_members(self, *, node: ast.AST | ObjectNode, cls: Class) -> None:
+    def on_class_members(self, *, node: ast.AST | ObjectNode, cls: Class, **_) -> None:
         logger.debug(f"Inspecting class member {cls.path}")
         if isinstance(node, ObjectNode):
             return  # skip runtime objects, their docstrings are already right

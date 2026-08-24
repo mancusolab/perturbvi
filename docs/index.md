@@ -1,89 +1,150 @@
-[![Documentation-webpage](https://img.shields.io/badge/Docs-Available-brightgreen)](https://mancusolab.github.io/perturbvi/)
-[![PyPI-Server](https://img.shields.io/pypi/v/perturbvi.svg)](https://pypi.org/project/perturbvi/)
-[![Github](https://img.shields.io/github/stars/mancusolab/perturbvi?style=social)](https://github.com/mancusolab/perturbvi)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Project generated with Hatch](https://img.shields.io/badge/%F0%9F%A5%9A-Hatch-4051b5.svg)](https://github.com/pypa/hatch)
+---
+hide:
+  - toc
+---
 
-# perturbVI
-`perturbvi` is a Python library to compute p-values of scores computed under exponential family models
-using saddlepoint approximation of the sampling distribution.
+# Single-cell Perturbation Analysis with PerturbVI
 
-  [**Installation**](#installation)
-  | [**Example**](#get-started-with-example)
-  | [**Notes**](#notes)
-  | [**Version**](#version-history)
-  | [**Support**](#support)
-  | [**Other Software**](#other-software)
+PerturbVI is a scalable approach to infer regulatory modules from single-cell Perturb-seq data.
 
-------------------
 
-## Installation
+## Install
 
-Users can download the latest repository and then use `pip`:
-
-``` bash
-git clone https://github.com/mancusolab/perturbvi.git
-cd perturbvi
-pip install .
+```bash
+uv pip install perturbvi
 ```
 
-## Get Started with Example
+## Quick start
 
-TBD
+### From AnnData (recommended)
 
-## Notes
+Prepare the file with transformed expression in `adata.X` and the binary
+perturbation matrix in `adata.obsm["G"]`, then load and fit:
 
--   `perturbvi` uses [JAX](https://github.com/google/jax) with [Just In
-    Time](https://jax.readthedocs.io/en/latest/jax-101/02-jitting.html)
-    compilation to achieve high-speed computation. However, there are
-    some [issues](https://github.com/google/jax/issues/5501) for JAX
-    with Mac M1 chip. To solve this, users need to initiate conda using
-    [miniforge](https://github.com/conda-forge/miniforge), and then
-    install `perturbvi` using `pip` in the desired environment.
+```python
+from perturbvi import fit_screen, load_screen, residualize_screen
 
-## Version History
+data = load_screen(
+    "screen.h5ad",
+    x_key=None,  # None (Default) = adata.X
+    g_key="G",  # "G" (Default) = adata.obsm["G"]
+    control=None,
+)
 
-TBD
+data = load_screen(
+    "screen.h5ad",
+    x_key="transformed",  # adata.layers["transformed"]
+    g_key="G",  # "G" (Default) = adata.obsm["G"]
+    control=None,
+)
+
+data = load_screen(
+    "screen.h5ad",
+    control="Nontargeting",  # drop the reference column
+    x_key="counts",  # adata.layers["counts"]
+    g_key="perturbations",  # adata.obsm["perturbations"]
+)
+
+data = residualize_screen(data)  # optional; only if you loaded covariates
+
+fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
+```
+
+Same workflow from the CLI:
+
+```bash
+perturbvi fit screen.h5ad \
+  --output results \
+  --z-dim 12 --l-dim 400 --tau 50
+```
+
+Omit `--control` when `G` is baseline-free; add `--control Nontargeting` when
+`G` keeps its reference column.
+
+```bash
+perturbvi analyze results
+```
+
+### Already have `X` and `G`? (arrays or CSV)
+
+`PerturbData` keeps expression, perturbations, and covariates aligned:
+
+| Argument | Shape | Contents |
+|---|---|---|
+| `X` | cells × genes | Normalized, scaled, or transformed expression |
+| `G` | cells × perturbations | Binary guide or target assignments |
+| `covariates` | cells × covariates | Variables whose effects should be removed from expression |
+| `control` | label | Reference column to drop from `G` (default: none) |
+
+```python
+from perturbvi import PerturbData, fit_screen, residualize_screen
+
+# control= drops the reference column; omit it when G is baseline-free
+data = PerturbData(
+    X=expression,
+    G=G,
+    covariates=covariates,
+    control="Nontargeting",
+)
+
+data = residualize_screen(data)  # optional
+
+fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
+```
+
+`X` and `G` are required and must list the same cells in the same row order.
+Read CSV/TSV with pandas first, then pass the DataFrames. `fit_screen()`
+centers expression; pass `standardize=True` to also scale each gene to unit
+variance. `control=` names the reference column to drop from `G`; omit it when
+`G` is already baseline-free.
+
+See the [Workflow](workflow.md) for complete input and analysis guidance and
+the [Input structure](input_structure.md) for where each piece of a screen
+lives in an AnnData file. The [Cookbook](cookbook.md#3-real-genetic-screens)
+covers real Datlinger, Norman, and Adamson screens.
+
+
+## Read next
+
+- [Workflow](workflow.md): constructing `X` and `G`, names, covariates,
+  fitting, saving, and analysis.
+- [Input structure](input_structure.md): AnnData layout for `X`, `G`, and
+  covariates.
+- [Cookbook](cookbook.md): real LUHMES, Datlinger, Adamson, Norman, and A375
+  10x examples.
+- [API](api.md): Python functions, CLI options, result tables, and saved files.
 
 ## Support
 
-Please report any bugs or feature requests in the [Issue
-Tracker](https://github.com/mancusolab/perturbvi/issues). If users have
-any questions or comments, please contact Dong Yuan (<dongyuan@usc.edu>)
-and Nicholas Mancuso (<nmancuso@usc.edu>).
+Please report bugs or feature requests in the
+[issue tracker](https://github.com/mancusolab/perturbvi/issues). For questions
+or comments, contact Abdullah Al Nahid (<alnahid@usc.edu>) or Nicholas Mancuso
+(<nmancuso@usc.edu>).
 
 ## Other Software
 
-Feel free to use other software developed by [Mancuso
-Lab](https://www.mancusolab.com/):
+Other software developed by the [Mancuso Lab](https://www.mancusolab.com/):
 
--   [SuShiE](https://github.com/mancusolab/sushie): a Bayesian
-    fine-mapping framework for molecular QTL data across multiple
-    ancestries.
--   [MA-FOCUS](https://github.com/mancusolab/ma-focus): a Bayesian
-    fine-mapping framework using
-    [TWAS](https://www.nature.com/articles/ng.3506) statistics across
-    multiple ancestries to identify the causal genes for complex traits.
--   [SuSiE-PCA](https://github.com/mancusolab/susiepca): a scalable
-    Bayesian variable selection technique for sparse principal component
-    analysis
--   [twas_sim](https://github.com/mancusolab/twas_sim): a Python
-    software to simulate [TWAS](https://www.nature.com/articles/ng.3506)
-    statistics.
--   [FactorGo](https://github.com/mancusolab/factorgo): a scalable
-    variational factor analysis model that learns pleiotropic factors
-    from GWAS summary statistics.
--   [HAMSTA](https://github.com/tszfungc/hamsta): a Python software to
-    estimate heritability explained by local ancestry data from
-    admixture mapping summary statistics.
+- [SuShiE](https://github.com/mancusolab/sushie): a Bayesian fine-mapping
+  framework for molecular QTL data across multiple ancestries.
+- [jaxQTL](https://github.com/mancusolab/jaxqtl): scalable, count-based
+  large-scale eQTL mapping.
+- [MA-FOCUS](https://github.com/mancusolab/ma-focus): a Bayesian fine-mapping
+  framework using [TWAS](https://www.nature.com/articles/ng.3506) statistics
+  across multiple ancestries to identify causal genes for complex traits.
+- [SuSiE-PCA](https://github.com/mancusolab/susiepca): scalable Bayesian
+  variable selection for sparse principal component analysis.
+- [twas_sim](https://github.com/mancusolab/twas_sim): simulation of
+  [TWAS](https://www.nature.com/articles/ng.3506) statistics.
+- [traceax](https://github.com/mancusolab/traceax): stochastic trace
+  estimation for linear operators.
+- [FactorGo](https://github.com/mancusolab/factorgo): scalable variational
+  factor analysis for learning pleiotropic factors from GWAS summary
+  statistics.
+- [HAMSTA](https://github.com/tszfungc/hamsta): estimation of heritability
+  explained by local ancestry data from admixture mapping summary statistics.
 
-------------------------------------------------------------------------
+---
 
-`perturbvi` is distributed under the terms of the
-[MIT](https://spdx.org/licenses/MIT.html) license.
-
-
-------------------------------------------------------------------------
-
-This project has been set up using Hatch. For details and usage
-information on Hatch see <https://github.com/pypa/hatch>.
+PerturbVI is distributed under the terms of the
+[MIT license](https://spdx.org/licenses/MIT.html).

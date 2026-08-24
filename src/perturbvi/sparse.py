@@ -11,8 +11,8 @@ import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import lineax as lx
 
-from jax._src.dtypes import JAXType  # ug...
 from jax.experimental import sparse
+from jax.typing import DTypeLike
 from jaxtyping import Array, ArrayLike, Float, Num
 
 
@@ -37,7 +37,7 @@ def _get_mean_terms(geno: Array, covar: Array) -> Array:
     return beta
 
 
-def _get_dense_var(geno: sparse.JAXSparse, dense_dtype: JAXType):
+def sparse_column_variance(geno: sparse.JAXSparse, dense_dtype: DTypeLike):
     # def _inner(_, variant):
     #     var_idx = jnp.mean(variant **2) - jnp.mean(variant) ** 2
     #     return _, var_idx
@@ -110,10 +110,12 @@ class SparseMatrix(lx.AbstractLinearOperator):
 
 class CenteredSparseMatrix(lx.AbstractLinearOperator):
     data: lx.AbstractLinearOperator
+    squared_norm: Optional[Array]
 
     @dispatch
-    def __init__(self, data: lx.AbstractLinearOperator):
+    def __init__(self, data: lx.AbstractLinearOperator, squared_norm: Optional[ArrayLike] = None):
         self.data = data
+        self.squared_norm = None if squared_norm is None else jnp.asarray(squared_norm)
 
     @dispatch
     def __init__(
@@ -125,8 +127,12 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
         n, p = matrix.shape
         geno_op = SparseMatrix(matrix)
         dtype = matrix.dtype
+        intercept_only = covar is None
+        raw_squared_norm = sparse.sparsify(jnp.sum)(matrix**2)
+        if hasattr(raw_squared_norm, "todense"):
+            raw_squared_norm = raw_squared_norm.todense()
 
-        if covar is None:
+        if intercept_only:
             covar = jnp.ones((n, 1), dtype=dtype)
             beta = _sparse_mean(matrix, axis=0, dtype=dtype).todense()
             beta = beta.reshape((1, p))
@@ -136,14 +142,18 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
         center_op = lx.MatrixLinearOperator(covar) @ lx.MatrixLinearOperator(beta)
 
         if scale:
-            wgt = jnp.sqrt(_get_dense_var(matrix, dtype))
+            wgt = jnp.sqrt(sparse_column_variance(matrix, dtype))
             scale_op = lx.DiagonalLinearOperator(1.0 / wgt)
             self.data = (geno_op - center_op) @ scale_op
+            self.squared_norm = jnp.asarray(n * p, dtype=dtype) if intercept_only else None
         else:
             self.data = geno_op - center_op
+            self.squared_norm = (
+                raw_squared_norm - n * jnp.sum(beta**2) if intercept_only else None
+            )
 
     @property
-    def dense_dtype(self) -> JAXType:
+    def dense_dtype(self) -> DTypeLike:
         return self.out_structure().dtype
 
     def mv(self, vector: Num[ArrayLike, " p"]) -> Float[Array, " n"]:
@@ -180,7 +190,7 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
         return self.data.as_matrix()
 
     def transpose(self) -> "CenteredSparseMatrix":
-        return CenteredSparseMatrix(self.data.T)
+        return CenteredSparseMatrix(self.data.T, self.squared_norm)
 
     @property
     def shape(self):
@@ -198,6 +208,18 @@ class CenteredSparseMatrix(lx.AbstractLinearOperator):
 
 @lx.is_symmetric.register(SparseMatrix)
 @lx.is_symmetric.register(CenteredSparseMatrix)
+def _(op):
+    return False
+
+
+@lx.is_diagonal.register(SparseMatrix)
+@lx.is_diagonal.register(CenteredSparseMatrix)
+def _(op):
+    return False
+
+
+@lx.is_tridiagonal.register(SparseMatrix)
+@lx.is_tridiagonal.register(CenteredSparseMatrix)
 def _(op):
     return False
 
@@ -227,4 +249,4 @@ def _(op):
 
 @lx.conj.register(CenteredSparseMatrix)
 def _(op):
-    return CenteredSparseMatrix(op.data)
+    return CenteredSparseMatrix(op.data, op.squared_norm)

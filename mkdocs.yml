@@ -1,13 +1,9 @@
-theme:  # pulled from optimistix
+theme:
     name: material
     features:
-        - navigation.sections  # Sections are included in the navigation on the left.
-        - toc.integrate  # Table of contents is integrated on the left; does not appear separately on the right.
-        - header.autohide  # header disappears as you scroll
+        - navigation.sections
+        - header.autohide
     palette:
-        # Light mode / dark mode
-        # We deliberately don't automatically use `media` to check a user's preferences. We default to light mode as
-        # (a) it looks more professional, and (b) is more obvious about the fact that it offers a (dark mode) toggle.
         - scheme: default
           primary: white
           accent: amber
@@ -21,24 +17,29 @@ theme:  # pulled from optimistix
              icon: material/weather-sunny
              name: Switch to light mode
     icon:
-        repo: fontawesome/brands/github               # GitHub logo in top right
-        logo: "material/tooltip-edit-outline"  # perturbvi logo in top left
-    favicon: "_static/favicon.png"
-    custom_dir: "docs/_overrides"  # Overriding part of the HTML
+        repo: fontawesome/brands/github
+        logo: material/tooltip-edit-outline
+    favicon: _static/favicon.png
+    custom_dir: docs/_overrides
 
 
-site_name: perturbVI
-site_description: The documentation for the perturbVI software library.
+site_name: PerturbVI
+site_description: The documentation for the PerturbVI software library.
 site_url: https://mancusolab.github.io/perturbvi
 
 repo_url: https://github.com/mancusolab/perturbvi
 repo_name: mancusolab/perturbvi
-edit_uri: ""  # No edit button, as some of our pages are in /docs and some in /examples via symlink, so it's impossible for them all to be accurate
+edit_uri: ""
 
 strict: true  # Don't allow warnings during the build process
 
+exclude_docs: |
+    superpowers/
+    _scripts/
+    _templates/
+    requirements.txt
+
 extra_javascript:
-    # The below three make MathJax work, see https://squidfunk.github.io/mkdocs-material/reference/mathjax/
     - _static/mathjax.js
     - https://polyfill.io/v3/polyfill.min.js?features=es6
     - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
@@ -47,23 +48,22 @@ extra_css:
     - _static/custom_css.css
 
 markdown_extensions:
-    - pymdownx.arithmatex:      # Render LaTeX via MathJax
+    - pymdownx.arithmatex:
         generic: true
-    - pymdownx.superfences      # Seems to enable syntax highlighting when used with the Material theme.
-    - pymdownx.details          # Allowing hidden expandable regions denoted by ???
-    - pymdownx.snippets:        # Include one Markdown file into another
-        base_path: docs
+    - pymdownx.superfences
+    - pymdownx.details
+    - pymdownx.snippets:
+        base_path:
+            - .
+            - docs
     - admonition
     - toc:
-        permalink: "¤"  # Adds a clickable permalink to each section heading
+        permalink: true
         toc_depth: 4
 
 plugins:
     - search    # default search plugin; needs manually re-enabling when using any other plugins
     - autorefs  # Cross-links to headings
-    - include_exclude_files:
-        exclude:
-            - "_overrides"
     - mkdocstrings:
         default_handler: python
         enable_inventory: true
@@ -110,10 +110,12 @@ plugins:
                     show_signature_annotations: true
 
 nav:
-    - 'index.md'
-    - API:
-        - 'api/infer.md'
-        - 'api/utils.md'
+    - Docs:
+        - Home: 'index.md'
+        - Workflow: 'workflow.md'
+        - Input structure: 'input_structure.md'
+        - Cookbook: 'cookbook.md'
+        - API: 'api.md'
     - Misc:
         - 'authors.md'
         - 'versions.md'

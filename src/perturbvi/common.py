@@ -7,40 +7,40 @@ from jaxtyping import Array, ArrayLike
 from .sparse import CenteredSparseMatrix, SparseMatrix
 
 
-DataMatrix = Array | SparseMatrix | CenteredSparseMatrix
+DataMatrix = Union[Array, SparseMatrix, CenteredSparseMatrix]
 FloatOrArray = Union[float, ArrayLike]
 
 
 class ELBOResults(NamedTuple):
-    """Define the class of all components in ELBO.
+    """Components of the evidence lower bound.
 
     Attributes:
-        elbo: the value of ELBO
-        E_ll: Expectation of log-likelihood
-        negKL_z: -KL divergence of Z
-        negKL_w: -KL divergence of W
-        negKL_gamma: -KL divergence of gamma
+        elbo: Evidence lower bound.
+        expected_loglike: Expected log-likelihood.
+        kl_factors: KL divergence for latent factors.
+        kl_loadings: KL divergence for loadings and their inclusion variables.
+        kl_guide: KL divergence for perturbation effects and their inclusion variables.
 
     """
 
     elbo: FloatOrArray
-    E_ll: FloatOrArray
-    negKL_z: FloatOrArray
-    negKL_w: FloatOrArray
-    negKL_gamma: FloatOrArray
+    expected_loglike: FloatOrArray
+    kl_factors: FloatOrArray
+    kl_loadings: FloatOrArray
+    kl_guide: FloatOrArray
 
     def __str__(self):
         return (
-            f"ELBO = {self.elbo:.3f} | E[logl] = {self.E_ll:.3f} | "
-            f"-KL[Z] = {self.negKL_z:.3f} | -KL[W] = {self.negKL_w:.3f} | "
-            f"-KL[G] = {self.negKL_gamma:.3f}"
+            f"ELBO = {self.elbo:.3f} | E[logl] = {self.expected_loglike:.3f} | "
+            f"KL[Z] = {self.kl_factors:.3f} | E_Q[KL[W]] + KL[Gamma] = {self.kl_loadings:.3f} | "
+            f"E_Q[KL[Beta]] + KL[Eta] = {self.kl_guide:.3f}|"
         )
 
 
 class ModelParams(NamedTuple):
     """
     Define the class for variational parameters of all the variable we need
-    to infer from the perturbVI.
+    to infer from PerturbVI.
 
     Attributes:
         mean_z: mean parameter for factor Z

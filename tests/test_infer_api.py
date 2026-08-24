@@ -1,0 +1,385 @@
+import inspect
+
+from typing import get_type_hints, Literal
+
+import numpy as np
+import pytest
+
+from scipy import sparse
+
+from jax.experimental import sparse as jax_sparse
+
+from perturbvi import fit_screen, infer
+from perturbvi._defaults import DEFAULT_P_PRIOR, DEFAULT_TAU, DEFAULT_VERBOSE
+from perturbvi.utils import analyze
+
+
+def _inputs():
+    X = np.array(
+        [
+            [1.0, 0.0, 2.0, 3.0],
+            [0.0, 2.0, 1.0, 2.0],
+            [2.0, 1.0, 0.0, 1.0],
+            [3.0, 2.0, 1.0, 0.0],
+            [4.0, 1.0, 3.0, 2.0],
+            [1.0, 4.0, 2.0, 4.0],
+        ]
+    )
+    G = np.array([[1.0, 0.0], [1, 0], [0, 1], [0, 1], [1, 0], [0, 1]])
+    return X, G
+
+
+def test_infer_keeps_data_together_and_model_settings_keyword_only():
+    parameters = inspect.signature(infer).parameters
+    assert list(parameters)[:2] == ["X", "G"]
+    assert parameters["X"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert parameters["G"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    for name in ("z_dim", "l_dim"):
+        assert parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
+        assert parameters[name].default is inspect.Parameter.empty
+    assert parameters["tau"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameters["tau"].default == DEFAULT_TAU
+    assert get_type_hints(infer)["init"] == Literal["random", "pca"]
+
+
+def test_elbo_results_has_one_canonical_definition():
+    from perturbvi.common import ELBOResults as CommonELBOResults
+    from perturbvi.infer import ELBOResults as InferELBOResults
+
+    assert InferELBOResults is CommonELBOResults
+
+
+def test_infer_uses_shared_p_prior_default():
+    assert inspect.signature(infer).parameters["p_prior"].default == DEFAULT_P_PRIOR
+    assert inspect.signature(fit_screen).parameters["p_prior"].default == DEFAULT_P_PRIOR
+
+
+def test_python_fit_interfaces_share_defaults():
+    expected = {
+        "p_prior": DEFAULT_P_PRIOR,
+        "tau": DEFAULT_TAU,
+        "standardize": False,
+        "init": "pca",
+        "max_iter": 500,
+        "tol": 1e-3,
+        "verbose": DEFAULT_VERBOSE,
+    }
+    for function in (infer, fit_screen):
+        parameters = inspect.signature(function).parameters
+        assert {name: parameters[name].default for name in expected} == expected
+        assert get_type_hints(function)["init"] == Literal["random", "pca"]
+
+
+def test_infer_rejects_zero_variance_before_standardizing():
+    X, G = _inputs()
+    X[:, 0] = 1.0
+    with pytest.raises(ValueError, match="zero or invalid variance"):
+        infer(
+            X,
+            G,
+            z_dim=1,
+            l_dim=1,
+            tau=2.0,
+            standardize=True,
+            init="random",
+            max_iter=1,
+            verbose=False,
+        )
+
+
+@pytest.mark.parametrize("standardize", [False, True])
+def test_infer_always_centers_and_optionally_scales_expression(standardize):
+    X, G = _inputs()
+    centered = X - X.mean(axis=0)
+    expected_x_ssq = X.size if standardize else np.sum(centered**2)
+
+    results = infer(
+        X,
+        G,
+        z_dim=1,
+        l_dim=1,
+        tau=2.0,
+        standardize=standardize,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+
+    np.testing.assert_allclose(results.params.x_ssq, expected_x_ssq, rtol=1e-5)
+
+
+def test_infer_sparse_expression_and_guides_remain_supported():
+    X, G = _inputs()
+    results = infer(
+        jax_sparse.BCOO.from_scipy_sparse(sparse.csr_matrix(X)),
+        jax_sparse.BCOO.from_scipy_sparse(sparse.csr_matrix(G)),
+        z_dim=1,
+        l_dim=1,
+        tau=2.0,
+        standardize=True,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+    assert results.pip.shape == (1, X.shape[1])
+    assert np.isfinite(np.asarray(results.pip)).all()
+
+
+def test_infer_accepts_bcsr_through_sparse_layout_boundary():
+    X, G = _inputs()
+    results = infer(
+        jax_sparse.BCSR.fromdense(X),
+        jax_sparse.BCSR.fromdense(G),
+        z_dim=1,
+        l_dim=1,
+        tau=2.0,
+        standardize=True,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+    assert results.pip.shape == (1, X.shape[1])
+
+
+@pytest.mark.parametrize("sparse_type", [jax_sparse.BCOO, jax_sparse.BCSR])
+@pytest.mark.parametrize("standardize", [False, True])
+def test_infer_accepts_integer_sparse_expression(sparse_type, standardize):
+    X, G = _inputs()
+    integer_X = sparse_type.fromdense(X.astype(np.int32))
+    centered = X - X.mean(axis=0)
+    expected_x_ssq = X.size if standardize else np.sum(centered**2)
+
+    results = infer(
+        integer_X,
+        G,
+        z_dim=1,
+        l_dim=1,
+        tau=2.0,
+        standardize=standardize,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+
+    np.testing.assert_allclose(results.params.x_ssq, expected_x_ssq, rtol=1e-5)
+    assert np.isfinite(np.asarray(results.pip)).all()
+
+
+def test_infer_sparse_pca_initialization_remains_supported():
+    X, G = _inputs()
+    results = infer(
+        jax_sparse.BCOO.from_scipy_sparse(sparse.csr_matrix(X)),
+        jax_sparse.BCOO.from_scipy_sparse(sparse.csr_matrix(G)),
+        z_dim=1,
+        l_dim=1,
+        tau=2.0,
+        init="pca",
+        max_iter=1,
+        verbose=False,
+    )
+    assert np.isfinite(np.asarray(results.pip)).all()
+
+
+def test_infer_annotation_prior_and_dense_guide_modes_remain_supported():
+    X, G = _inputs()
+    A = np.column_stack((np.ones(X.shape[1]), np.arange(X.shape[1]) % 2))
+    annotated = infer(
+        X,
+        G,
+        z_dim=1,
+        l_dim=1,
+        A=A,
+        tau=2.0,
+        init="random",
+        max_iter=3,
+        verbose=False,
+    )
+    dense_guides = infer(
+        X,
+        G,
+        z_dim=1,
+        l_dim=1,
+        p_prior=None,
+        tau=2.0,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+    assert np.isfinite(np.asarray(annotated.pip)).all()
+    assert np.isfinite(np.asarray(dense_guides.params.mean_beta)).all()
+
+
+def test_annotation_optimizer_state_is_initialized_once_and_reused(monkeypatch):
+    import importlib
+
+    from perturbvi.common import ELBOResults
+
+    infer_module = importlib.import_module("perturbvi.infer")
+    init_calls = []
+    observed_states = []
+
+    class FakeAnnotationPrior:
+        def __init__(self, A, search):
+            self.A = A
+
+        @property
+        def shape(self):
+            return self.A.shape
+
+        def init_state(self, params):
+            init_calls.append(True)
+            return params._replace(ann_state=0)
+
+    def fake_inner_loop(X, guide, factors, loadings, annotation, params):
+        observed_states.append(params.ann_state)
+        score = float(len(observed_states))
+        elbo = ELBOResults(score, score, 0.0, 0.0, 0.0)
+        return elbo, params._replace(ann_state=params.ann_state + 1)
+
+    monkeypatch.setattr(infer_module, "AnnotationPriorModel", FakeAnnotationPrior)
+    monkeypatch.setattr(infer_module, "_inner_loop", fake_inner_loop)
+
+    X, G = _inputs()
+    A = np.ones((X.shape[1], 1))
+    infer(X, G, z_dim=1, l_dim=1, A=A, tau=2.0, init="random", max_iter=3, verbose=False)
+
+    assert len(init_calls) == 1
+    assert observed_states == [0, 1, 2]
+
+
+@pytest.mark.parametrize("p_prior", [None, 0.0])
+def test_dense_guide_mode_preserves_deterministic_beta_effects(p_prior):
+    X, G = _inputs()
+    results = infer(
+        X,
+        G,
+        z_dim=1,
+        l_dim=1,
+        p_prior=p_prior,
+        tau=2.0,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+
+    assert results.params.p is None
+    np.testing.assert_array_equal(results.params.p_hat, np.ones((1, G.shape[1])))
+    np.testing.assert_array_equal(results.params.var_beta, np.zeros((G.shape[1], 1)))
+
+    tables = analyze(results)
+    np.testing.assert_allclose(tables["perturbation_effect"].to_numpy(), results.params.mean_beta)
+    np.testing.assert_allclose(
+        tables["gene_effect"].to_numpy(),
+        (results.params.mean_beta @ results.params.W).T,
+    )
+
+
+def test_infer_preserves_factor_covariance_shape():
+    X, G = _inputs()
+    results = infer(
+        X,
+        G,
+        z_dim=2,
+        l_dim=2,
+        tau=2.0,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+
+    assert results.params.var_z.shape == (2, 2)
+
+
+def test_infer_does_not_mutate_numpy_inputs_when_standardizing():
+    X, G = _inputs()
+    original_X = X.copy()
+    original_G = G.copy()
+    infer(
+        X,
+        G,
+        z_dim=1,
+        l_dim=1,
+        tau=2.0,
+        standardize=True,
+        init="random",
+        max_iter=1,
+        verbose=False,
+    )
+    np.testing.assert_array_equal(X, original_X)
+    np.testing.assert_array_equal(G, original_G)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"tau": 0.0}, "tau must be"),
+        ({"p_prior": 2.0}, "p_prior"),
+        ({"max_iter": 0}, "max_iter"),
+        ({"tol": 0.0}, "tol must be"),
+        ({"verbose": "yes"}, "verbose must be"),
+    ],
+)
+def test_infer_rejects_invalid_control_arguments(overrides, message):
+    X, G = _inputs()
+    kwargs = {
+        "z_dim": 1,
+        "l_dim": 1,
+        "tau": 2.0,
+        "init": "random",
+        "max_iter": 1,
+        "verbose": False,
+    }
+    kwargs.update(overrides)
+    with pytest.raises(ValueError, match=message):
+        infer(X, G, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("dimension", "value"),
+    [("z_dim", 1.5), ("z_dim", True), ("l_dim", "1"), ("l_dim", False)],
+)
+def test_infer_rejects_noninteger_dimensions_before_initialization(dimension, value):
+    X, G = _inputs()
+    kwargs = {
+        "z_dim": 1,
+        "l_dim": 1,
+        "tau": 2.0,
+        "init": "random",
+        "max_iter": 1,
+        "verbose": False,
+    }
+    kwargs[dimension] = value
+    with pytest.raises(ValueError, match=dimension):
+        infer(X, G, **kwargs)
+
+
+def test_infer_rejects_non_array_matrix_with_clear_error():
+    _, G = _inputs()
+    with pytest.raises(ValueError, match="X must be"):
+        infer(object(), G, z_dim=1, l_dim=1, tau=2.0, init="random", max_iter=1, verbose=False)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda X, G: (X, G[:-1], None), "Leading dimension"),
+        (lambda X, G: (X, np.column_stack((G[:, 0], np.zeros(len(G)))), None), "all-zero"),
+        (lambda X, G: (X, G, np.ones((X.shape[1] - 1, 2))), "feature dimension"),
+        (lambda X, G: (X, G, np.empty((X.shape[1], 0))), "annotation column"),
+    ],
+)
+def test_infer_rejects_invalid_guide_and_annotation_shapes(change, message):
+    X, G = _inputs()
+    changed_X, changed_G, A = change(X, G)
+    with pytest.raises(ValueError, match=message):
+        infer(
+            changed_X,
+            changed_G,
+            z_dim=1,
+            l_dim=1,
+            tau=2.0,
+            A=A,
+            init="random",
+            max_iter=1,
+            verbose=False,
+        )

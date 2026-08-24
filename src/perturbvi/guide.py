@@ -1,5 +1,6 @@
-# pattern: Functional Core
+from __future__ import annotations
 
+# pattern: Functional Core
 from abc import abstractmethod
 
 from plum import dispatch
@@ -59,18 +60,6 @@ def _get_diag(G: SparseMatrix) -> Array:
     return jsparse.sparsify(jnp.sum)(G.matrix**2, axis=0).todense()  # type: ignore
 
 
-@dispatch
-def _wgt_sumsq(G: SparseMatrix, vector: Array) -> Array:
-    tmp = G.matrix * vector
-    return jsparse.sparsify(jnp.sum)(tmp**2)  # type: ignore
-
-
-@dispatch
-def _wgt_sumsq(G: Array, vector: Array) -> Array:
-    tmp = G * vector
-    return jnp.sum(tmp**2)
-
-
 _multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
 
 
@@ -80,7 +69,7 @@ def _update_dense_beta(G: Array, params: ModelParams) -> ModelParams:
     G_op = lx.MatrixLinearOperator(G)
 
     # Use lineax's CG solver
-    solver = lx.NormalCG(rtol=1e-6, atol=1e-6)
+    solver = lx.Normal(lx.CG(rtol=1e-6, atol=1e-6))
     out = _multi_linear_solve(G_op, params.mean_z, solver)
 
     # Updated beta
@@ -92,7 +81,7 @@ def _update_dense_beta(G: Array, params: ModelParams) -> ModelParams:
 @dispatch
 def _update_dense_beta(G: SparseMatrix, params: ModelParams) -> ModelParams:
     # Use lineax's CG solver
-    solver = lx.NormalCG(rtol=1e-6, atol=1e-6)
+    solver = lx.Normal(lx.CG(rtol=1e-6, atol=1e-6))
 
     out = jax.vmap(lambda b: lx.linear_solve(G, b, solver), in_axes=1)(params.mean_z)
 
