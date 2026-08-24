@@ -98,7 +98,8 @@ from perturbvi import PerturbData, residualize_screen
 expression = pd.read_csv("expression.csv", index_col=0)
 G = pd.read_csv("perturbations.csv", index_col=0)
 
-data = PerturbData(X=expression, G=G)
+# control= drops the reference column; omit it when G is baseline-free
+data = PerturbData(X=expression, G=G, control="Nontargeting")
 ```
 
 `PerturbData` accepts the resulting DataFrames; it does not guess how CSV or

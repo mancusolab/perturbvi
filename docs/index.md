@@ -59,7 +59,8 @@ perturbvi analyze results
 ```python
 from perturbvi import PerturbData, fit_screen, residualize_screen
 
-data = PerturbData(X=expression, G=G, covariates=covariates)
+# control= drops the reference column; omit it when G is baseline-free
+data = PerturbData(X=expression, G=G, covariates=covariates, control="Nontargeting")
 data = residualize_screen(data)  # optional
 fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
 ```
@@ -67,7 +68,8 @@ fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
 `X` and `G` are required and must list the same cells in the same row order.
 Read CSV/TSV with pandas first, then pass the DataFrames. `fit_screen()`
 centers expression; pass `standardize=True` to also scale each gene to unit
-variance.
+variance. `control=` names the reference column to drop from `G`; omit it when
+`G` is already baseline-free.
 
 See the [Workflow](workflow.md) for complete input and analysis guidance and
 the [Input structure](input_structure.md) for where each piece of a screen

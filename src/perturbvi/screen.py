@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal, Optional, Sequence, TYPE_CHECKING, Union
+from dataclasses import dataclass, InitVar
+from typing import Any, Literal, Optional, Sequence, TYPE_CHECKING, Union
 
 import numpy as np
 import pandas as pd
@@ -30,15 +30,20 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PerturbData:
-    """Expression, perturbation design, labels, and optional covariates."""
+    """Expression, perturbation design, labels, and optional covariates.
+
+    ``control`` names the reference column to drop from ``G`` at construction
+    time. Omit it when ``G`` is already baseline-free.
+    """
 
     X: ArrayLike
     G: ArrayLike
     gene_names: Optional[Sequence[str]] = None
     perturbation_names: Optional[Sequence[str]] = None
     covariates: Optional[pd.DataFrame] = None
+    control: InitVar[Optional[str]] = None
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, control: Optional[str]) -> None:
         """Infer DataFrame labels and check row order when indexes are available."""
         row_index = None
         if isinstance(self.X, pd.DataFrame):
@@ -69,6 +74,54 @@ class PerturbData:
                 "perturbation_names",
                 tuple(str(name) for name in self.perturbation_names),
             )
+        if control is not None:
+            dropped_G, dropped_names = _drop_control(self.G, self.perturbation_names, control)
+            object.__setattr__(self, "G", dropped_G)
+            object.__setattr__(self, "perturbation_names", dropped_names)
+
+
+def _delete_column(value, index: int) -> Any:
+    """Return ``value`` without the column at ``index``."""
+    if isinstance(value, jax_sparse.JAXSparse):
+        if isinstance(value, jax_sparse.BCSR):
+            row_counts = np.diff(np.asarray(value.indptr))
+            rows = np.repeat(np.arange(value.shape[0]), row_counts)
+            coordinates = np.column_stack([rows, np.asarray(value.indices).reshape(-1)])
+            value = jax_sparse.BCOO((np.asarray(value.data).reshape(-1), coordinates), shape=value.shape)
+        indices = np.asarray(value.indices)
+        data = np.asarray(value.data).reshape(-1)
+        keep = indices[:, 1] != index
+        kept = indices[keep].copy()
+        kept[:, 1] = np.where(kept[:, 1] > index, kept[:, 1] - 1, kept[:, 1])
+        return jax_sparse.BCOO((data[keep], kept), shape=(value.shape[0], value.shape[1] - 1))
+    if scipy_sparse.issparse(value):
+        coo = value.tocoo()
+        keep = coo.col != index
+        shifted = np.where(coo.col[keep] > index, coo.col[keep] - 1, coo.col[keep])
+        return scipy_sparse.coo_matrix(
+            (coo.data[keep], (coo.row[keep], shifted)),
+            shape=(coo.shape[0], coo.shape[1] - 1),
+        )
+    return np.delete(np.asarray(value), index, axis=1)
+
+
+def _drop_control(G, names, control: str) -> tuple[Any, Optional[tuple[str, ...]]]:
+    """Drop the named reference column from ``G``, returning ``(G, names)``."""
+    control = str(control)
+    if isinstance(G, pd.DataFrame):
+        if control not in G.columns:
+            raise ValueError(f"control column {control!r} is not present in G")
+        dropped = G.drop(columns=control)
+        if names is not None:
+            names = tuple(name for name in names if str(name) != control)
+        return dropped, names
+    if names is not None:
+        labels = tuple(str(name) for name in names)
+        if control not in labels:
+            raise ValueError(f"control column {control!r} is not present in perturbation_names")
+        index = labels.index(control)
+        return _delete_column(G, index), labels[:index] + labels[index + 1 :]
+    raise ValueError("control= requires G DataFrame columns or perturbation_names")
 
 
 @dataclass(frozen=True)

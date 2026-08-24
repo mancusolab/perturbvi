@@ -130,3 +130,77 @@ def test_covariates_reject_only_broken_alignment_or_values():
     values[3] = np.inf
     with pytest.raises(ValueError, match="non-finite"):
         validate_screen(replace(data, covariates=pd.DataFrame({"depth": values})))
+
+
+def test_control_drops_named_dataframe_column():
+    cells = [f"cell_{index}" for index in range(6)]
+    X = pd.DataFrame(np.ones((6, 3)), index=cells, columns=["A", "B", "C"])
+    G = pd.DataFrame(
+        [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        index=cells,
+        columns=["Nontargeting", "target_A", "target_B"],
+    )
+
+    data = PerturbData(X=X, G=G, control="Nontargeting")
+    validate_screen(data)
+
+    assert list(data.G.columns) == ["target_A", "target_B"]
+    assert data.perturbation_names == ("target_A", "target_B")
+
+
+def test_control_drops_named_array_column():
+    data = _make_data(n_perturbations=4)
+    names = list(data.perturbation_names)
+
+    dropped = PerturbData(
+        X=data.X,
+        G=data.G,
+        gene_names=data.gene_names,
+        perturbation_names=names,
+        control=names[0],
+    )
+    validate_screen(dropped)
+
+    assert dropped.G.shape == (data.G.shape[0], data.G.shape[1] - 1)
+    assert dropped.perturbation_names == tuple(names[1:])
+
+
+def test_control_drops_named_jax_sparse_column():
+    data = _make_data(n_perturbations=4)
+    names = list(data.perturbation_names)
+    G = jax_sparse.BCOO.fromdense(np.asarray(data.G))
+
+    dropped = PerturbData(
+        X=data.X,
+        G=G,
+        gene_names=data.gene_names,
+        perturbation_names=names,
+        control=names[0],
+    )
+    validate_screen(dropped)
+
+    assert dropped.G.shape == (data.G.shape[0], data.G.shape[1] - 1)
+    assert dropped.perturbation_names == tuple(names[1:])
+
+
+def test_control_missing_column_raises():
+    data = _make_data()
+    with pytest.raises(ValueError, match="not present"):
+        PerturbData(
+            X=data.X,
+            G=data.G,
+            gene_names=data.gene_names,
+            perturbation_names=data.perturbation_names,
+            control="missing",
+        )
+
+
+def test_control_requires_labels_for_unlabeled_arrays():
+    data = _make_data()
+    with pytest.raises(ValueError, match="perturbation_names|columns"):
+        PerturbData(X=data.X, G=data.G, control="target")
+
+
+def test_control_none_passes_g_through_unchanged():
+    data = _make_data()
+    assert PerturbData(X=data.X, G=data.G, control=None).G.shape == data.G.shape

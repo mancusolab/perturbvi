@@ -14,12 +14,14 @@ column names are used automatically:
 ```python
 from perturbvi import PerturbData
 
-data = PerturbData(X=expression, G=G, covariates=covariates)
+# control= drops the reference column; omit it when G is baseline-free
+data = PerturbData(X=expression, G=G, covariates=covariates, control="Nontargeting")
 ```
 
 CSV and TSV paths are not parsed automatically. Load them into pandas first,
 then pass the DataFrames to `PerturbData` so row indexes and headers are under
-your control.
+your control. Pass `control=` when `G` keeps its reference column; omit it when
+`G` is already baseline-free.
 
 `X`, `G`, and covariates must contain the same cells in the same row order.
 NumPy and sparse arrays have no column names, so provide them separately:
