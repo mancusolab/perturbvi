@@ -15,7 +15,12 @@ column names are used automatically:
 from perturbvi import PerturbData
 
 # control= drops the reference column; omit it when G is baseline-free
-data = PerturbData(X=expression, G=G, covariates=covariates, control="Nontargeting")
+data = PerturbData(
+    X=expression,
+    G=G,
+    covariates=covariates,
+    control="Nontargeting",
+)
 ```
 
 CSV and TSV paths are not parsed automatically. Load them into pandas first,

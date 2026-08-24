@@ -23,10 +23,29 @@ perturbation matrix in `adata.obsm["G"]`, then load and fit:
 ```python
 from perturbvi import fit_screen, load_screen, residualize_screen
 
-data = load_screen("screen.h5ad")  # control=None (default): G has no reference column
-data = load_screen("screen.h5ad", control="Nontargeting")  # G keeps its reference column
+data = load_screen(
+    "screen.h5ad",
+    x_key=None,  # None (Default) = adata.X
+    g_key="G",  # "G" (Default) = adata.obsm["G"]
+    control=None,
+)
+
+data = load_screen(
+    "screen.h5ad",
+    x_key="transformed",  # adata.layers["transformed"]
+    g_key="G",  # "G" (Default) = adata.obsm["G"]
+    control=None,
+)
+
+data = load_screen(
+    "screen.h5ad",
+    x_key="counts",  # adata.layers["counts"]
+    g_key="perturbations",  # adata.obsm["perturbations"]
+    control="Nontargeting",  # drop the reference column
+)
 
 data = residualize_screen(data)  # optional; only if you loaded covariates
+
 fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
 ```
 
@@ -60,8 +79,15 @@ perturbvi analyze results
 from perturbvi import PerturbData, fit_screen, residualize_screen
 
 # control= drops the reference column; omit it when G is baseline-free
-data = PerturbData(X=expression, G=G, covariates=covariates, control="Nontargeting")
+data = PerturbData(
+    X=expression,
+    G=G,
+    covariates=covariates,
+    control="Nontargeting",
+)
+
 data = residualize_screen(data)  # optional
+
 fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
 ```
 
