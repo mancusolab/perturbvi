@@ -248,7 +248,7 @@ uv pip install matplotlib
 Each function accepts one labeled DataFrame and returns a Matplotlib Figure.
 Read the corresponding CSV directly, or pass `fit.B`, `fit.W`, or `fit.BW`.
 Full matrices and explicit subsets use the same functions. See the
-[LUHMES Analysis with PerturbVI](luhmes.md).
+[LUHMES Analysis with PerturbVI](luhmes.ipynb).
 
 Appearance options are `scale` (`"linear"` or `"asinh"`), `cmap`, and
 `colorbar_ticks`. Typography, spacing, and italic gene labels are automatic.

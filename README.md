@@ -12,11 +12,11 @@ single-cell Perturb-seq data.
 > [!NOTE]
 > For the preprint, please see: <br/>
 > *PerturbVI: A Scalable Latent Factor Model to Infer Genetic Regulatory Modules through CRISPR Perturbation Data*. <br/>
-> [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi) (placeholder DOI)
+> [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi)
 
 > [!IMPORTANT]
-> To reproduce the analyses in the preprint: <br/>
-> [zenodo.org/records/0000000](https://zenodo.org/records/0000000) (placeholder)
+> To reproduce the analyses: <br/>
+> [https://github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis)
 
 ## Installation
 
@@ -34,18 +34,16 @@ from pathlib import Path
 from perturbvi import fit_screen, load_screen, save_results
 
 result_dir = Path("results/my_screen")
-data = load_screen(
-    "data/screen.h5ad",
-)
+screen = load_screen("data/screen.h5ad")
+
 fit = fit_screen(
-    data,
-    z_dim=12,
-    l_dim=100,
+    screen,
+    z_dim=20,
+    l_dim=1000,
+    init="pca"
 )
-save_results(
-    fit,
-    result_dir,
-)
+
+save_results(fit, result_dir)
 ```
 
 This saves the fitted model and labeled result CSVs in `result_dir`.
