@@ -4,7 +4,8 @@
 
 # PerturbVI
 
-Perturbvi is a scalable approach to infer regulatory modules through informative latent component model in the single-cell Perturb-seq data.
+PerturbVI infers latent gene programs and their perturbation effects from
+single-cell Perturb-seq data.
 
 ## Install
 
@@ -12,112 +13,178 @@ Perturbvi is a scalable approach to infer regulatory modules through informative
 uv pip install perturbvi
 ```
 
-## Quick start
+## LUHMES: fit and interpret
 
-### From AnnData (recommended)
+This example uses the processed LUHMES expression and perturbation matrices
+in `luhmes/luhmes_exp.csv` and `luhmes/luhmes_G.csv`.
+Expression has cells on rows and Ensembl gene IDs on columns; `G` has matching
+cell rows and binary condition columns. Adjust these paths to your files.
+The [LUHMES Analysis with PerturbVI tutorial](https://mancusolab.github.io/perturbvi/luhmes/)
+explains the selections and shows the resulting figures and neuronal GO enrichment.
 
-Prepare the file with transformed expression in `adata.X` and the binary
-perturbation matrix in `adata.obsm["G"]`, then load and fit:
+### Fit the model
 
-```python
-from perturbvi import fit_screen, load_screen, residualize_screen
-
-data = load_screen(
-    "screen.h5ad",
-    x_key=None,  # None (Default) = adata.X
-    g_key="G",  # "G" (Default) = adata.obsm["G"]
-    control=None,
-)
-
-data = load_screen(
-    "screen.h5ad",
-    x_key="transformed",  # adata.layers["transformed"]
-    g_key="G",  # "G" (Default) = adata.obsm["G"]
-    control=None,
-)
-
-data = load_screen(
-    "screen.h5ad",
-    x_key="counts",  # adata.layers["counts"]
-    g_key="perturbations",  # adata.obsm["perturbations"]
-    control="Nontargeting",  # drop the reference column
-)
-
-data = residualize_screen(data)  # optional; only if you loaded covariates
-
-fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
-```
-
-Same workflow from the CLI:
-
-```bash
-perturbvi fit screen.h5ad \
-  --output results \
-  --z-dim 12 --l-dim 400 --tau 50
-```
-
-Omit `--control` when `G` is baseline-free; add `--control Nontargeting` when
-`G` keeps its reference column.
-
-```bash
-perturbvi analyze results
-```
-
-### Already have `X` and `G`? (arrays or CSV)
-
-`PerturbData` keeps expression, perturbations, and covariates aligned:
-
-| Argument | Shape | Contents |
-|---|---|---|
-| `X` | cells × genes | Normalized, scaled, or transformed expression |
-| `G` | cells × perturbations | Binary guide or target assignments |
-| `covariates` | cells × covariates | Variables whose effects should be removed from expression |
-| `control` | label | Reference column to drop from `G` (default: none) |
+The documentation example uses 20 factors, 1,000 single-effect loading
+components, and PCA initialization. The expression is already processed and
+scaled; `fit_screen()` centers genes. All 15 condition columns, including
+`Nontargeting`, are retained to match that example.
 
 ```python
-from perturbvi import PerturbData, fit_screen, residualize_screen
+from pathlib import Path
 
-# control= drops the reference column; omit it when G is baseline-free
+import jax
+import pandas as pd
+
+from perturbvi import PerturbData, fit_screen, save_results
+
+jax.config.update("jax_enable_x64", True)
+
+data_dir = Path("luhmes")
+result_dir = Path("perturbvi_results")
+expression = pd.read_csv(data_dir / "luhmes_exp.csv", index_col=0)
+G = pd.read_csv(data_dir / "luhmes_G.csv", index_col=0)
 data = PerturbData(
     X=expression,
     G=G,
-    covariates=covariates,
-    control="Nontargeting",
 )
-
-data = residualize_screen(data)  # optional
-
-fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
+fit = fit_screen(
+    data,
+    z_dim=20,
+    l_dim=1000,
+    init="pca",
+    tau=100,
+    standardize=False,
+    max_iter=500,
+    tol=0.001,
+    seed=0,
+    verbose=True,
+)
+save_results(
+    fit,
+    result_dir,
+)
 ```
 
-`X` and `G` are both required, and their rows must refer to the same cells in
-the same order. Read CSV/TSV files with pandas first, then pass the resulting
-DataFrames so gene and perturbation names stay aligned.
+Saving writes `model.pkl` and six labeled CSVs: `W`, `PIP_W`, `B`, `PIP_B`,
+`BW`, and `PVE`. `W` is factors by genes, `B` is perturbations by factors,
+and `BW = B @ W` is perturbations by genes. PIP matrices describe inclusion
+probabilities; effect matrices describe magnitude and direction.
 
-`fit_screen()` always centers each gene across cells. If your expression is
-not already scaled, pass `standardize=True` to also divide each gene by its
-standard deviation, giving every gene unit variance.
+### Plot perturbation effects on factors
 
-`control=` names a reference column in `G` to drop (for example
-`"Nontargeting"`). Omit it when `G` is already baseline-free.
+Install Matplotlib for plotting:
 
-See the [Workflow](https://mancusolab.github.io/perturbvi/workflow/)
-for complete input and analysis guidance and the
-[Input structure](https://mancusolab.github.io/perturbvi/input_structure/)
-page for where each piece of a screen lives in an AnnData file. The
-[Cookbook](https://mancusolab.github.io/perturbvi/cookbook/#3-real-genetic-screens)
-for real Datlinger, Norman, and Adamson screens.
+```bash
+uv pip install matplotlib
+```
+
+If you already have saved results, start here and point `result_dir` to that
+folder. Read only the matrix needed for each plot. Each function returns a
+Matplotlib figure that you can save or customize.
+
+```python
+from pathlib import Path
+
+import pandas as pd
+from perturbvi import plotting as pp
+
+result_dir = Path("perturbvi_results")
+B = pd.read_csv(result_dir / "B.csv", index_col=0)
+fig = pp.plot_factor_effects(
+    B,
+    perturbations=["ADNP", "ARID1B", "ASH1L", "CHD2", "PTEN", "SETD5"],
+    factors=["factor_1", "factor_2", "factor_3", "factor_4", "factor_6", "factor_8",
+             "factor_9", "factor_11", "factor_12", "factor_14", "factor_16"],
+    show_significance=False,
+    scale="asinh",
+)
+fig.savefig(
+    result_dir / "factor_effects.png",
+    dpi=300,
+    bbox_inches="tight",
+)
+```
+
+Omit `perturbations` and `factors` to show the full matrix. Factor IDs are
+zero-based (`factor_0`); displayed labels start at Factor 1. The selections
+above match the compact LUHMES example.
+
+### Plot gene loadings on factors
+
+Supply a `gene_annotations.csv` with three columns: `gene_ID`, `gene_name`,
+and `annotation`. Place it in the results folder. `gene_ID` must match the
+fitted gene IDs; the other columns supply display names and biological groups.
+Genes sharing an annotation are automatically grouped together, even if their
+rows are separated in the CSV. The LUHMES tutorial uses 30 selected markers
+and regulators; your own annotations and selections can address any tissue
+or biological question.
+
+```python
+annotations = pd.read_csv(result_dir / "gene_annotations.csv")
+genes = annotations["gene_ID"].tolist()
+W = pd.read_csv(result_dir / "W.csv", index_col=0)
+fig = pp.plot_gene_loadings(
+    W,
+    genes=genes,
+    factors=["factor_1", "factor_2", "factor_3", "factor_4", "factor_6", "factor_8",
+             "factor_9", "factor_11", "factor_12", "factor_14", "factor_16"],
+    gene_annotations=annotations,
+    show_significance=False,
+    scale="asinh",
+)
+fig.savefig(
+    result_dir / "gene_loadings.png",
+    dpi=300,
+    bbox_inches="tight",
+)
+```
+
+### Plot overall perturbation effects on genes
+
+Overall effects combine contributions through all fitted factors, including
+factors omitted from a displayed subset.
+
+```python
+BW = pd.read_csv(result_dir / "BW.csv", index_col=0)
+fig = pp.plot_gene_effects(
+    BW,
+    genes=genes,
+    perturbations=["ADNP", "ARID1B", "ASH1L", "CHD2", "PTEN", "SETD5"],
+    gene_annotations=annotations,
+    show_significance=False,
+    scale="asinh",
+)
+fig.savefig(
+    result_dir / "gene_effects.png",
+    dpi=300,
+    bbox_inches="tight",
+)
+```
+
+Pass `fit.B`, `fit.W`, or `fit.BW` directly if the fit is in memory.
+Each plot returns a Matplotlib figure. Asinh colorbars retain original effect
+units; colors alone do not indicate significance.
+
+### Optional overall-effect significance
+
+LFSR requires posterior sampling. It is needed for DEG counts or optional
+significance dots, but not for the heatmaps above. Compute it separately:
+
+```bash
+perturbvi lfsr perturbvi_results --draws 2000 --seed 2026
+```
+
+This writes `LFSR_BW.csv`. For significance dots, supply `lfsr=LFSR_BW`
+for gene effects or `pip=PIP_B` / `pip=PIP_W` for factor effects / loadings,
+and set `show_significance=True`. See the tutorial for counts and enrichment.
 
 ## Documentation
 
-- [Workflow](https://mancusolab.github.io/perturbvi/workflow/): constructing
-  `X` and `G`, names, covariates, fitting, saving, and analysis.
-- [Input structure](https://mancusolab.github.io/perturbvi/input_structure/):
-  AnnData layout for `X`, `G`, and covariates.
-- [Cookbook](https://mancusolab.github.io/perturbvi/cookbook/): real LUHMES,
-  Datlinger, Adamson, Norman, and A375 10x examples.
-- [API](https://mancusolab.github.io/perturbvi/api/): Python functions, CLI
-  options, result tables, and saved files.
+- [LUHMES Analysis with PerturbVI](https://mancusolab.github.io/perturbvi/luhmes/):
+  a complete fit, plotting, and neuronal enrichment tutorial with figures.
+- [Using PerturbVI with Your Data](https://mancusolab.github.io/perturbvi/workflow/):
+  CSV and AnnData inputs, controls, covariates, and other screen examples.
+- [API](https://mancusolab.github.io/perturbvi/api/): functions, result matrices, and CLI.
 
 ## Support
 
@@ -126,30 +193,5 @@ Please report bugs or feature requests in the
 or comments, contact Abdullah Al Nahid (<alnahid@usc.edu>) or Nicholas Mancuso
 (<nmancuso@usc.edu>).
 
-## Other Software
-
-Other software developed by the [Mancuso Lab](https://www.mancusolab.com/):
-
-- [SuShiE](https://github.com/mancusolab/sushie): a Bayesian fine-mapping
-  framework for molecular QTL data across multiple ancestries.
-- [jaxQTL](https://github.com/mancusolab/jaxqtl): scalable, count-based
-  large-scale eQTL mapping.
-- [MA-FOCUS](https://github.com/mancusolab/ma-focus): a Bayesian fine-mapping
-  framework using [TWAS](https://www.nature.com/articles/ng.3506) statistics
-  across multiple ancestries to identify causal genes for complex traits.
-- [SuSiE-PCA](https://github.com/mancusolab/susiepca): scalable Bayesian
-  variable selection for sparse principal component analysis.
-- [twas_sim](https://github.com/mancusolab/twas_sim): simulation of
-  [TWAS](https://www.nature.com/articles/ng.3506) statistics.
-- [traceax](https://github.com/mancusolab/traceax): stochastic trace
-  estimation for linear operators.
-- [FactorGo](https://github.com/mancusolab/factorgo): scalable variational
-  factor analysis for learning pleiotropic factors from GWAS summary
-  statistics.
-- [HAMSTA](https://github.com/tszfungc/hamsta): estimation of heritability
-  explained by local ancestry data from admixture mapping summary statistics.
-
----
-
-PerturbVI is distributed under the terms of the
-[MIT license](https://spdx.org/licenses/MIT.html).
+Developed by the [Mancuso Lab](https://www.mancusolab.com/).
+Distributed under the [MIT license](https://spdx.org/licenses/MIT.html).

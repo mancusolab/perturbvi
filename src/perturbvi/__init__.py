@@ -6,7 +6,8 @@ from .infer import (
     compute_pve as compute_pve,
     infer as infer,
 )
-from .io import load_results as load_results, save_results as save_results
+from .io import save_results as save_results
+from .lfsr import estimate_lfsr as estimate_lfsr
 from .loaders import load_screen as load_screen
 from .preprocess import residualize_screen as residualize_screen
 from .screen import fit_screen as fit_screen, FitResults as FitResults, PerturbData as PerturbData
@@ -20,10 +21,10 @@ __all__ = (
     "compute_elbo",
     "compute_pip",
     "compute_pve",
+    "estimate_lfsr",
     "fit_screen",
     "generate_sim",
     "infer",
-    "load_results",
     "load_screen",
     "residualize_screen",
     "save_results",

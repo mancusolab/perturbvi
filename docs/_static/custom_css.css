@@ -1,4 +1,13 @@
 /* Fix anchored headings being hidden by the navbar. */
+/* Keep the original LUHMES artwork readable, including in dark mode. */
+.md-typeset img.luhmes-panel {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 1.2rem auto 0.8rem;
+    background: white;
+}
+
 html {
     scroll-padding-top: 50px;
     font-size: 110%;

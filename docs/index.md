@@ -3,10 +3,10 @@ hide:
   - toc
 ---
 
-# Single-cell Perturbation Analysis with PerturbVI
+# PerturbVI
 
-PerturbVI is a scalable approach to infer regulatory modules from single-cell Perturb-seq data.
-
+PerturbVI infers latent gene programs and their perturbation effects from
+single-cell Perturb-seq data.
 
 ## Install
 
@@ -16,103 +16,59 @@ uv pip install perturbvi
 
 ## Quick start
 
-### From AnnData (recommended)
-
-Prepare the file with transformed expression in `adata.X` and the binary
-perturbation matrix in `adata.obsm["G"]`, then load and fit:
+Prepare an H5AD file with transformed expression in `adata.X` and a binary,
+named perturbation DataFrame in `adata.obsm["G"]`.
 
 ```python
-from perturbvi import fit_screen, load_screen, residualize_screen
+from pathlib import Path
+from perturbvi import fit_screen, load_screen, save_results
 
+result_dir = Path("results/my_screen")
 data = load_screen(
-    "screen.h5ad",
-    x_key=None,  # None (Default) = adata.X
-    g_key="G",  # "G" (Default) = adata.obsm["G"]
-    control=None,
+    "data/screen.h5ad",
 )
-
-data = load_screen(
-    "screen.h5ad",
-    x_key="transformed",  # adata.layers["transformed"]
-    g_key="G",  # "G" (Default) = adata.obsm["G"]
-    control=None,
+fit = fit_screen(
+    data,
+    z_dim=12,
+    l_dim=100,
 )
-
-data = load_screen(
-    "screen.h5ad",
-    control="Nontargeting",  # drop the reference column
-    x_key="counts",  # adata.layers["counts"]
-    g_key="perturbations",  # adata.obsm["perturbations"]
+save_results(
+    fit,
+    result_dir,
 )
-
-data = residualize_screen(data)  # optional; only if you loaded covariates
-
-fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
 ```
 
-Same workflow from the CLI:
+The result directory contains the fitted posterior and labeled CSVs for
+loadings, perturbation effects, inclusion probabilities, and variance summaries.
+
+## Set up plotting
+
+Install Matplotlib for plotting:
 
 ```bash
-perturbvi fit screen.h5ad \
-  --output results \
-  --z-dim 12 --l-dim 400 --tau 50
+uv pip install matplotlib
 ```
-
-Omit `--control` when `G` is baseline-free; add `--control Nontargeting` when
-`G` keeps its reference column.
-
-```bash
-perturbvi analyze results
-```
-
-### Already have `X` and `G`? (arrays or CSV)
-
-`PerturbData` keeps expression, perturbations, and covariates aligned:
-
-| Argument | Shape | Contents |
-|---|---|---|
-| `X` | cells × genes | Normalized, scaled, or transformed expression |
-| `G` | cells × perturbations | Binary guide or target assignments |
-| `covariates` | cells × covariates | Variables whose effects should be removed from expression |
-| `control` | label | Reference column to drop from `G` (default: none) |
 
 ```python
-from perturbvi import PerturbData, fit_screen, residualize_screen
+from perturbvi import plotting as pp
 
-# control= drops the reference column; omit it when G is baseline-free
-data = PerturbData(
-    X=expression,
-    G=G,
-    covariates=covariates,
-    control="Nontargeting",
+fig = pp.plot_factor_effects(
+    fit.B,
+    scale="asinh",
 )
-
-data = residualize_screen(data)  # optional
-
-fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
+fig.savefig(
+    result_dir / "factor_effects.png",
+    dpi=300,
+)
 ```
 
-`X` and `G` are required and must list the same cells in the same row order.
-Read CSV/TSV with pandas first, then pass the DataFrames. `fit_screen()`
-centers expression; pass `standardize=True` to also scale each gene to unit
-variance. `control=` names the reference column to drop from `G`; omit it when
-`G` is already baseline-free.
+## Guides
 
-See the [Workflow](workflow.md) for complete input and analysis guidance and
-the [Input structure](input_structure.md) for where each piece of a screen
-lives in an AnnData file. The [Cookbook](cookbook.md#3-real-genetic-screens)
-covers real Datlinger, Norman, and Adamson screens.
-
-
-## Read next
-
-- [Workflow](workflow.md): constructing `X` and `G`, names, covariates,
-  fitting, saving, and analysis.
-- [Input structure](input_structure.md): AnnData layout for `X`, `G`, and
-  covariates.
-- [Cookbook](cookbook.md): real LUHMES, Datlinger, Adamson, Norman, and A375
-  10x examples.
-- [API](api.md): Python functions, CLI options, result tables, and saved files.
+- [LUHMES Analysis with PerturbVI](luhmes.md): fit the LUHMES screen, plot
+  factor and gene effects, and examine neuronal GO enrichment.
+- [Using PerturbVI with Your Data](workflow.md): prepare CSVs or AnnData,
+  encode controls and target pairs, select covariates, fit, and save results.
+- [API](api.md): function arguments, result matrices, and CLI reference.
 
 ## Support
 
@@ -121,30 +77,5 @@ Please report bugs or feature requests in the
 or comments, contact Abdullah Al Nahid (<alnahid@usc.edu>) or Nicholas Mancuso
 (<nmancuso@usc.edu>).
 
-## Other Software
-
-Other software developed by the [Mancuso Lab](https://www.mancusolab.com/):
-
-- [SuShiE](https://github.com/mancusolab/sushie): a Bayesian fine-mapping
-  framework for molecular QTL data across multiple ancestries.
-- [jaxQTL](https://github.com/mancusolab/jaxqtl): scalable, count-based
-  large-scale eQTL mapping.
-- [MA-FOCUS](https://github.com/mancusolab/ma-focus): a Bayesian fine-mapping
-  framework using [TWAS](https://www.nature.com/articles/ng.3506) statistics
-  across multiple ancestries to identify causal genes for complex traits.
-- [SuSiE-PCA](https://github.com/mancusolab/susiepca): scalable Bayesian
-  variable selection for sparse principal component analysis.
-- [twas_sim](https://github.com/mancusolab/twas_sim): simulation of
-  [TWAS](https://www.nature.com/articles/ng.3506) statistics.
-- [traceax](https://github.com/mancusolab/traceax): stochastic trace
-  estimation for linear operators.
-- [FactorGo](https://github.com/mancusolab/factorgo): scalable variational
-  factor analysis for learning pleiotropic factors from GWAS summary
-  statistics.
-- [HAMSTA](https://github.com/tszfungc/hamsta): estimation of heritability
-  explained by local ancestry data from admixture mapping summary statistics.
-
----
-
-PerturbVI is distributed under the terms of the
-[MIT license](https://spdx.org/licenses/MIT.html).
+Developed by the [Mancuso Lab](https://www.mancusolab.com/).
+Distributed under the [MIT license](license.md).

@@ -126,7 +126,13 @@ def _drop_control(G, names, control: str) -> tuple[Any, Optional[tuple[str, ...]
 
 @dataclass(frozen=True)
 class FitResults:
-    """Labeled result returned by :func:`fit_screen`."""
+    """Fitted posterior and labeled matrices returned by :func:`fit_screen`.
+
+    ``W``, ``PIP_W``, ``B``, ``PIP_B``, ``BW``, and ``PVE`` are pandas
+    DataFrames, computed on access. Pass the matrix needed to a plotting
+    function directly, e.g. ``plot_factor_effects(fit.B)``. Raw inference
+    arrays remain accessible through ``inference``.
+    """
 
     inference: "InferResults"
     gene_names: tuple[str, ...]
@@ -149,8 +155,58 @@ class FitResults:
         return self.inference.pip
 
     @property
-    def W(self):
-        return self.inference.W
+    def _factor_index(self) -> pd.Index:
+        return pd.Index(
+            [f"factor_{i}" for i in range(self.params.mean_beta.shape[1])],
+            name="factor_id",
+        )
+
+    @property
+    def _perturbation_index(self) -> pd.Index:
+        return pd.Index(self.perturbation_names, name="perturbation_id")
+
+    @property
+    def W(self) -> pd.DataFrame:
+        """Inclusion-weighted posterior mean loadings: factors by genes."""
+        from jax.experimental import enable_x64
+
+        with enable_x64(np.asarray(self.params.mean_w).dtype == np.dtype("float64")):
+            values = np.asarray(self.params.W)
+        return pd.DataFrame(values, index=self._factor_index, columns=self.gene_names)
+
+    @property
+    def PIP_W(self) -> pd.DataFrame:
+        """Loading inclusion probabilities: factors by genes."""
+        return pd.DataFrame(
+            np.asarray(self.inference.pip), index=self._factor_index, columns=self.gene_names,
+        )
+
+    @property
+    def B(self) -> pd.DataFrame:
+        """Inclusion-weighted perturbation effects: perturbations by factors."""
+        values = np.asarray(self.params.mean_beta) * np.asarray(self.params.p_hat).T
+        return pd.DataFrame(values, index=self._perturbation_index, columns=self._factor_index)
+
+    @property
+    def PIP_B(self) -> pd.DataFrame:
+        """Perturbation-coefficient inclusion probabilities: perturbations by factors."""
+        return pd.DataFrame(
+            np.asarray(self.params.p_hat).T,
+            index=self._perturbation_index,
+            columns=self._factor_index,
+        )
+
+    @property
+    def BW(self) -> pd.DataFrame:
+        """Overall effects through all factors: perturbations by genes, B @ W."""
+        return self.B @ self.W
+
+    @property
+    def PVE(self) -> pd.DataFrame:
+        """Per-factor expression variance summary: factors by one."""
+        return pd.DataFrame(
+            {"PVE": np.asarray(self.inference.pve).reshape(-1)}, index=self._factor_index,
+        )
 
 
 def _shape(value, name: str) -> tuple[int, ...]:
