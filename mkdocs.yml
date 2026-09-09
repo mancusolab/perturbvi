@@ -33,6 +33,9 @@ edit_uri: ""
 
 strict: true  # Don't allow warnings during the build process
 
+hooks:
+    - docs/_scripts/notebook_pages.py
+
 exclude_docs: |
     superpowers/
     _scripts/
@@ -47,6 +50,7 @@ extra_css:
     - _static/custom_css.css
 
 markdown_extensions:
+    - md_in_html
     - attr_list
     - pymdownx.arithmatex:
         generic: true
@@ -60,6 +64,9 @@ markdown_extensions:
 plugins:
     - search    # default search plugin; needs manually re-enabling when using any other plugins
     - autorefs  # Cross-links to headings
+    - mknotebooks:
+        execute: false
+        enable_default_jupyter_cell_styling: false
     - mkdocstrings:
         default_handler: python
         enable_inventory: true
@@ -108,7 +115,7 @@ plugins:
 nav:
     - Docs:
         - Home: 'index.md'
-        - LUHMES Analysis with PerturbVI: 'luhmes.md'
+        - LUHMES Analysis with PerturbVI: 'luhmes.ipynb'
         - Using PerturbVI with Your Data: 'workflow.md'
         - API: 'api.md'
     - Misc:

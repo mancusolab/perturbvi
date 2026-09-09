@@ -1,14 +1,11 @@
 # Using PerturbVI with Your Data
 
-Prepare expression and perturbation assignments, fit latent factors, then read
-the results with pandas or plot them. This guide covers CSVs, AnnData, and
-common perturbation designs. For an analysis with figures, see
-[LUHMES Analysis with PerturbVI](luhmes.md).
+Start with an expression matrix and perturbation assignments for the same cells.
 
 ## 1. Set up
 
 ```bash
-uv pip install perturbvi
+uv pip install perturbvi matplotlib
 ```
 
 ```python
@@ -18,7 +15,7 @@ import pandas as pd
 from perturbvi import PerturbData, fit_screen, load_screen, save_results
 
 data_dir = Path("data")
-result_dir = Path("results/my_screen")
+result_dir = Path("results")
 ```
 
 ## 2. Prepare the inputs
@@ -29,18 +26,18 @@ result_dir = Path("results/my_screen")
 | `G` | Cells × perturbations | Binary target or guide assignments |
 | `covariates`, optional | Cells × covariates | Variables to regress out of expression |
 
-All inputs must contain the same cells in the same order. DataFrame columns
-supply gene and perturbation names. Use unique identifiers; gene IDs should
-also match the annotations you plan to use downstream.
+Keep cells in the same order in every input. Use unique gene and perturbation
+names for the columns. If you have gene annotations, their IDs must match
+the expression matrix.
 
-PerturbVI centers each gene. It does not perform raw-count QC, normalization,
-gene selection, or guide calling. Prepare those upstream, for example with
-Scanpy and your experiment's guide-calling pipeline.
+Before fitting, filter low-quality cells and genes, normalize expression,
+select genes, and assign perturbations to cells. PerturbVI expects these steps
+to be complete.
 
 ### Controls and multiple perturbations
 
-Each column of `G` represents one modeled perturbation. A cell can have more
-than one active column:
+In `G`, use 1 when a cell has a perturbation and 0 otherwise. Cells with
+multiple perturbations have multiple 1s:
 
 | Cell assignment | `G[CEBPE]` | `G[RUNX1T1]` |
 |---|---:|---:|
@@ -49,33 +46,30 @@ than one active column:
 | RUNX1T1 | 0 | 1 |
 | CEBPE + RUNX1T1 | 1 | 1 |
 
-If `G` contains a separate control column, pass its name as
-`control="Nontargeting"` to drop that column. Control cells remain in the data.
-Omit `control` when controls already have all-zero rows. Omitting it when a
-control column exists retains that column as a modeled condition, as in the
-[LUHMES example](luhmes.md).
+If `G` has a control column, `control="Nontargeting"` removes that column
+while keeping the control cells. Without this option, the control column is
+fitted like any other perturbation. If control cells already have all-zero
+rows, leave `control` unset.
 
 ### CSV or TSV
 
-Put cell identifiers in the first column and gene or perturbation names in
-the header. For TSV files, add `sep="\t"` to the reads.
+Use cell IDs as row labels and gene or perturbation names as column headers.
+For TSV files, add `sep="\t"` to `pd.read_csv()`.
 
 ```python
-expression = pd.read_csv(data_dir / "expression.csv", index_col=0)
+X = pd.read_csv(data_dir / "expression.csv", index_col=0)
 G = pd.read_csv(data_dir / "perturbations.csv", index_col=0)
-data = PerturbData(
-    X=expression,
-    G=G,
-)
+
+data = PerturbData(X=X, G=G)
 ```
 
 ??? example "NumPy or sparse arrays"
-    Arrays have no column labels, so supply both name lists explicitly.
+    With arrays, provide the gene and perturbation names separately.
 
     ```python
     data = PerturbData(
-        X=expression_array,
-        G=G_array,
+        X=X_arr,
+        G=G_arr,
         gene_names=gene_names,
         perturbation_names=perturbation_names,
     )
@@ -83,7 +77,8 @@ data = PerturbData(
 
 ### AnnData
 
-Use this layout for an AnnData object, H5AD file, or AnnData Zarr folder:
+`load_screen()` reads AnnData objects, H5AD files, and AnnData Zarr folders.
+It expects:
 
 | Location | Contents |
 |---|---|
@@ -94,32 +89,30 @@ Use this layout for an AnnData object, H5AD file, or AnnData Zarr folder:
 | `adata.obs`, optional | Covariate columns |
 
 ```python
-data = load_screen(
-    data_dir / "screen.h5ad",
-)
+data = load_screen(data_dir / "screen.h5ad")
 ```
 
-Pass an AnnData object instead of a path if it is already loaded. Use
-`x_key="transformed"` for `adata.layers["transformed"]`, or
-`g_key="perturbations"` if `G` is stored under another `obsm` key.
+You can also pass an already loaded AnnData object. To read expression from
+`adata.layers["transformed"]`, set `x_key="transformed"`. To read assignments
+from `adata.obsm["perturbations"]`, set `g_key="perturbations"`.
 
 ??? example "Build G from one target label per cell"
     Here `adata.obs["target"]` contains target names and the label `control`.
 
     ```python
     adata.obsm["G"] = adata.obs["target"].str.get_dummies().astype(int)
-    data = load_screen(
-        adata,
-        control="control",
-    )
+
+    data = load_screen(adata, control="control")
     ```
 
 ### Covariates
 
-Pass the variables you want removed from expression. `fit_screen()` regresses
-them out before fitting; a separate correction call is unnecessary.
-Numeric columns are continuous covariates. Text, categorical, and boolean
-columns are treated as groups. Convert numeric batch labels to `category`.
+Pass covariates such as batch or mitochondrial percentage to adjust expression
+before fitting. `fit_screen()` performs the regression automatically.
+
+Numeric columns are treated as continuous values; text, categorical, and
+boolean columns define groups. For batches numbered 1, 2, 3, and so on,
+convert the column to `category`.
 
 ??? example "Covariates from AnnData or a CSV"
     With AnnData, provide column names from `adata.obs`:
@@ -136,6 +129,7 @@ columns are treated as groups. Convert numeric batch labels to `category`.
     ```python
     covariates = pd.read_csv(data_dir / "covariates.csv", index_col=0)
     covariates["batch"] = covariates["batch"].astype("category")
+
     data = PerturbData(
         X=expression,
         G=G,
@@ -143,18 +137,19 @@ columns are treated as groups. Convert numeric batch labels to `category`.
     )
     ```
 
-Choose covariates deliberately: a variable confounded with perturbation can
-remove the signal of interest. Skip this step if expression is already corrected.
+If a covariate is confounded with perturbation, correcting for it can also
+remove the perturbation signal. Skip correction if it has already been done.
 
 ## 3. Dataset examples
 
-These optional recipes replace the input-loading step above. Each creates
-`data` and selects a `result_dir`; then continue to [fitting](#4-fit-and-save).
-The Datlinger, Adamson, and Norman examples use H5AD files distributed by
-[scPerturb](https://github.com/sanderlab/scPerturb). Put them in `data_dir`.
+Choose an example that matches your screen, then continue to
+[fit and save](#4-fit-and-save). Each example creates `data` and `result_dir`.
 
-??? example "Raw-count preprocessing used by these recipes"
-    Install Scanpy, then run this setup before any of the four recipes:
+Download the Datlinger, Adamson, or Norman H5AD files from
+[scPerturb](https://github.com/sanderlab/scPerturb) into `data_dir`.
+
+??? example "Preprocess raw counts"
+    Install Scanpy and define this function before running an example:
 
     ```bash
     uv pip install scanpy
@@ -210,6 +205,7 @@ The Datlinger, Adamson, and Norman examples use H5AD files distributed by
     adata = transform_counts(adata)
 
     adata.obsm["G"] = adata.obs["target"].str.get_dummies().astype(int)
+
     data = load_screen(
         adata,
         control="control",
@@ -301,22 +297,17 @@ The Datlinger, Adamson, and Norman examples use H5AD files distributed by
 
 ## 4. Fit and save
 
-After choosing one input route:
+Fit the model using the `data` prepared above:
 
 ```python
 fit = fit_screen(
     data,
-    z_dim=12,
-    l_dim=100,
-    init="pca",
-    tau=100,
-    max_iter=500,
-    seed=0,
+    z_dim=20,
+    l_dim=1000,
+    init="pca"
 )
-save_results(
-    fit,
-    result_dir,
-)
+
+save_results(fit, result_dir)
 ```
 
 | Setting | Meaning |
@@ -324,105 +315,41 @@ save_results(
 | `z_dim` | Number of latent factors |
 | `l_dim` | Number of single-effect loading components per factor |
 | `init` | Initialization: `"pca"` or `"random"` |
-| `tau` | Initial expression noise precision, updated during fitting |
 
-These are example settings, not values selected for every dataset.
-Fitting centers genes; use `standardize=True` to also scale them to unit
-variance. See the [API](api.md#covariates-and-fitting) for all settings.
+Adjust the number of factors and loading components for your analysis.
+Genes are centered automatically; set `standardize=True` to also scale each
+gene to unit variance.
+
+See the [API reference](api.md#covariates-and-fitting) for all fitting options.
 
 ??? example "Fit from the command line"
-    For a prepared H5AD with transformed expression in `X` and named `obsm["G"]`:
+    For an H5AD file with transformed expression in `X` and perturbation
+    assignments in `obsm["G"]`:
 
     ```bash
-    perturbvi fit data/screen.h5ad --output results/my_screen --z-dim 12 --l-dim 100 --tau 100
+    perturbvi fit data/screen.h5ad --output results --z-dim 20 --l-dim 1000
     ```
 
     Add `--control Nontargeting` if that reference column should be dropped.
     Run `perturbvi fit --help` for layer and covariate options.
 
 ??? note "Reuse covariate-corrected expression across fits"
-    If you supplied covariates and plan several fits, correct expression once:
+    When fitting the same data several times, you can correct expression once:
 
     ```python
     from perturbvi import residualize_screen
 
-    corrected_data = residualize_screen(data)
+    resid = residualize_screen(data)
+
     fit = fit_screen(
-        corrected_data,
-        z_dim=12,
-        l_dim=100,
+        resid,
+        z_dim=20,
+        l_dim=1000,
+        init="pca"
     )
     ```
 
-## 5. Read and plot results
+## 5. Plot and interpret results
 
-Install Matplotlib for plotting:
-
-```bash
-uv pip install matplotlib
-```
-
-Saving writes `model.pkl` and six labeled CSVs:
-
-| File | Rows × columns | Contents |
-|---|---|---|
-| `W.csv` | Factors × genes | Inclusion-weighted mean loadings |
-| `PIP_W.csv` | Factors × genes | Loading inclusion probabilities |
-| `B.csv` | Perturbations × factors | Inclusion-weighted mean effects on factors |
-| `PIP_B.csv` | Perturbations × factors | Effect inclusion probabilities |
-| `BW.csv` | Perturbations × genes | Overall effects, `B @ W` |
-| `PVE.csv` | Factors × 1 | Expression variance summary |
-
-Effect matrices describe magnitude and direction; PIP matrices describe
-inclusion probability. Read only the matrix you need:
-
-```python
-from perturbvi import plotting as pp
-
-B = pd.read_csv(result_dir / "B.csv", index_col=0)
-fig = pp.plot_factor_effects(
-    B,
-    show_significance=False,
-    scale="asinh",
-)
-fig.savefig(
-    result_dir / "factor_effects.png",
-    dpi=300,
-)
-```
-
-After fitting in Python, `fit.B`, `fit.W`, and `fit.BW` are already DataFrames.
-You can pass them directly to plotting functions. The
-[LUHMES analysis](luhmes.md#5-perturbation-effects-on-factors) demonstrates
-subsets, gene annotations, gene heatmaps, and enrichment.
-
-## 6. Optional overall-effect significance
-
-LFSR measures uncertainty in the sign of an overall gene effect. Compute it
-when you need DEG counts or significance dots; it is not needed for effect
-heatmaps or factor enrichment.
-
-```python
-from perturbvi import estimate_lfsr
-
-LFSR_BW = estimate_lfsr(
-    result_dir,
-    draws=2000,
-    seed=2026,
-)
-LFSR_BW.to_csv(result_dir / "LFSR_BW.csv")
-```
-
-For an existing LFSR file, read it directly:
-
-```python
-LFSR_BW = pd.read_csv(result_dir / "LFSR_BW.csv", index_col=0)
-deg_counts = (LFSR_BW < 0.05).sum(axis=1)
-```
-
-??? example "Compute LFSR from the command line"
-    ```bash
-    perturbvi lfsr results/my_screen --draws 2000 --seed 2026
-    ```
-
-    This writes `LFSR_BW.csv` in the saved result directory.
+The [LUHMES notebook](luhmes.ipynb) shows how to plot and interpret the results,
+count significant genes, and run GO enrichment.

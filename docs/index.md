@@ -11,11 +11,11 @@ single-cell Perturb-seq data.
 !!! note
     For the preprint, please see: <br/>
     *PerturbVI: A Scalable Latent Factor Model to Infer Genetic Regulatory Modules through CRISPR Perturbation Data*. <br/>
-    [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi) (placeholder DOI)
+    [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi)
 
 !!! important
-    To reproduce the analyses in the preprint: <br/>
-    [zenodo.org/records/0000000](https://zenodo.org/records/0000000) (placeholder)
+    To reproduce the analyses: <br/>
+    [https://github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis)
 
 ## Installation
 
@@ -33,18 +33,16 @@ from pathlib import Path
 from perturbvi import fit_screen, load_screen, save_results
 
 result_dir = Path("results/my_screen")
-data = load_screen(
-    "data/screen.h5ad",
-)
+screen = load_screen("data/screen.h5ad")
+
 fit = fit_screen(
-    data,
-    z_dim=12,
-    l_dim=100,
+    screen,
+    z_dim=20,
+    l_dim=1000,
+    init="pca"
 )
-save_results(
-    fit,
-    result_dir,
-)
+
+save_results(fit, result_dir)
 ```
 
 This saves the fitted model and labeled result CSVs in `result_dir`.
@@ -52,7 +50,7 @@ See the tutorials for plotting and enrichment.
 
 ## Tutorials
 
-- [LUHMES Analysis with PerturbVI](luhmes.md): fitting, factor and gene effects, and neuronal GO enrichment.
+- [LUHMES Analysis with PerturbVI](luhmes.ipynb): fitting, factor and gene effects, and neuronal GO enrichment.
 - Replogle Analysis with PerturbVI: fitting and interpretation (coming soon).
 - [Using PerturbVI with Your Data](workflow.md): CSV and AnnData inputs, controls, covariates, and fitting.
 - [API](api.md): function arguments, result matrices, and CLI.
