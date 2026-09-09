@@ -47,14 +47,11 @@ extra_css:
     - _static/custom_css.css
 
 markdown_extensions:
+    - attr_list
     - pymdownx.arithmatex:
         generic: true
     - pymdownx.superfences
     - pymdownx.details
-    - pymdownx.snippets:
-        base_path:
-            - .
-            - docs
     - admonition
     - toc:
         permalink: true
@@ -111,13 +108,11 @@ plugins:
 nav:
     - Docs:
         - Home: 'index.md'
-        - Workflow: 'workflow.md'
-        - Input structure: 'input_structure.md'
-        - Cookbook: 'cookbook.md'
+        - LUHMES Analysis with PerturbVI: 'luhmes.md'
+        - Using PerturbVI with Your Data: 'workflow.md'
         - API: 'api.md'
     - Misc:
         - 'authors.md'
-        - 'versions.md'
         - 'license.md'
         - 'conduct.md'
         - 'cite.md'

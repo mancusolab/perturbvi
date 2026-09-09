@@ -11,7 +11,6 @@ from jax.experimental import sparse as jax_sparse
 
 from perturbvi import fit_screen, infer
 from perturbvi._defaults import DEFAULT_P_PRIOR, DEFAULT_TAU, DEFAULT_VERBOSE
-from perturbvi.utils import analyze
 
 
 def _inputs():
@@ -265,13 +264,6 @@ def test_dense_guide_mode_preserves_deterministic_beta_effects(p_prior):
     assert results.params.p is None
     np.testing.assert_array_equal(results.params.p_hat, np.ones((1, G.shape[1])))
     np.testing.assert_array_equal(results.params.var_beta, np.zeros((G.shape[1], 1)))
-
-    tables = analyze(results)
-    np.testing.assert_allclose(tables["perturbation_effect"].to_numpy(), results.params.mean_beta)
-    np.testing.assert_allclose(
-        tables["gene_effect"].to_numpy(),
-        (results.params.mean_beta @ results.params.W).T,
-    )
 
 
 def test_infer_preserves_factor_covariance_shape():

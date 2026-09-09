@@ -13,7 +13,6 @@ import lineax as lx
 from jax import jit, lax, numpy as jnp, random as rdm
 from jaxtyping import Array
 
-from .analysis import analyze_output as analyze  # noqa: F401
 from .common import ModelParams
 from .log import get_logger
 
@@ -56,7 +55,7 @@ def kl_bernoulli(q: Array, p: Array, eps: float = 1e-8) -> Array:
 
 @partial(jit, static_argnums=(2, 3, 4))
 def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
-    """Probabilistic PCA algorithm to initialize latent factors.
+    """Approximate principal axes using sparse-compatible subspace iteration.
 
     **Arguments:**
 
@@ -72,49 +71,44 @@ def prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3):
 
     **Returns:**
 
-    - `Z` [`Array`]: The estimated latent factors.
+    - `Z` [`Array`]: Principal axes scaled to squared norm N per column,
+      ordered by decreasing explained variance.
 
-    -`W` [`Array`]: The estimated loadings.
+    -`W` [`Array`]: Consistently scaled loadings; Z @ W is the fitted
+      rank-k approximation. X should already be centered.
     """
 
     n_dim, p_dim = X.shape
 
-    # initial guess for W
-    w_key, z_key = rdm.split(rng_key, 2)
+    if not 0 < k <= min(n_dim, p_dim):
+        raise ValueError("k must be positive and no larger than either dimension of X")
 
-    # good enough for initialization
-    solver = lx.Cholesky()
-
-    # check if reach the max_iter, or met the norm criterion every 100 iteration
+    # Orthogonal iteration avoids inverses of potentially singular Gram
+    # matrices. Only N x k and P x k dense arrays are needed for sparse X.
     def _condition(carry):
-        i, _, Z, old_Z = carry
-        iter_check = i < max_iter
-        tol_check = jnp.linalg.norm(Z - old_Z) > tol
-        # scaled_tol_check = tol_check / n_dim > tol
-        return iter_check & tol_check
+        i, _, distance = carry
+        return (i < max_iter) & (distance > tol)
 
-    # EM algorithm for PPCA
     def _step(carry):
-        i, W, Z, _ = carry
+        i, Q, _ = carry
+        P, _ = jnp.linalg.qr(X.T @ Q, mode="reduced")
+        new_Q, _ = jnp.linalg.qr(X @ P, mode="reduced")
+        # Distance between subspaces, invariant to basis rotations/signs.
+        distance = jnp.linalg.norm(new_Q - Q @ (Q.T @ new_Q))
+        return i + 1, new_Q, distance
 
-        # E step
-        W_op = lx.MatrixLinearOperator(W @ W.T, tags=lx.positive_semidefinite_tag)
-        Z_new = multi_linear_solve(W_op, W @ X.T, solver).value
-
-        # M step
-        Z_op = lx.MatrixLinearOperator(Z_new.T @ Z_new, tags=lx.positive_semidefinite_tag)
-        W = multi_linear_solve(Z_op, Z_new.T @ X, solver).value.T
-
-        return i + 1, W, Z_new, Z
-
-    W = rdm.normal(w_key, shape=(k, p_dim))
-    Z = rdm.normal(z_key, shape=(n_dim, k))
-    Z_zero = jnp.zeros_like(Z)
-    initial_carry = 0, W, Z, Z_zero
-
-    _, W, Z, _ = lax.while_loop(_condition, _step, initial_carry)
-    Z, _ = jnp.linalg.qr(Z)
-
+    Q, _ = jnp.linalg.qr(X @ rdm.normal(rng_key, shape=(p_dim, k)), mode="reduced")
+    _, Q, _ = lax.while_loop(_condition, _step, (0, Q, jnp.asarray(jnp.inf, dtype=Q.dtype)))
+    # QR alone supplies an arbitrary basis; rotate into actual principal axes.
+    U, singular, Vt = jnp.linalg.svd((X.T @ Q).T, full_matrices=False)
+    scale = jnp.sqrt(jnp.asarray(n_dim, dtype=Q.dtype))
+    Z = (Q @ U) * scale
+    W = singular[:, None] * Vt / scale
+    # Fix the otherwise arbitrary sign using the largest loading.
+    anchors = jnp.argmax(jnp.abs(W), axis=1)
+    signs = jnp.where(W[jnp.arange(k), anchors] < 0, -1.0, 1.0)
+    Z = Z * signs
+    W = W * signs[:, None]
     return Z, W
 
 

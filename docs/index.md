@@ -3,12 +3,21 @@ hide:
   - toc
 ---
 
-# Single-cell Perturbation Analysis with PerturbVI
+# PerturbVI
 
-PerturbVI is a scalable approach to infer regulatory modules from single-cell Perturb-seq data.
+PerturbVI infers latent gene programs and their perturbation effects from
+single-cell Perturb-seq data.
 
+!!! note
+    For the preprint, please see: <br/>
+    *PerturbVI: A Scalable Latent Factor Model to Infer Genetic Regulatory Modules through CRISPR Perturbation Data*. <br/>
+    [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi) (placeholder DOI)
 
-## Install
+!!! important
+    To reproduce the analyses in the preprint: <br/>
+    [zenodo.org/records/0000000](https://zenodo.org/records/0000000) (placeholder)
+
+## Installation
 
 ```bash
 uv pip install perturbvi
@@ -16,103 +25,37 @@ uv pip install perturbvi
 
 ## Quick start
 
-### From AnnData (recommended)
-
-Prepare the file with transformed expression in `adata.X` and the binary
-perturbation matrix in `adata.obsm["G"]`, then load and fit:
+Prepare an H5AD file with transformed expression in `adata.X` and a binary,
+named perturbation DataFrame in `adata.obsm["G"]`.
 
 ```python
-from perturbvi import fit_screen, load_screen, residualize_screen
+from pathlib import Path
+from perturbvi import fit_screen, load_screen, save_results
 
+result_dir = Path("results/my_screen")
 data = load_screen(
-    "screen.h5ad",
-    x_key=None,  # None (Default) = adata.X
-    g_key="G",  # "G" (Default) = adata.obsm["G"]
-    control=None,
+    "data/screen.h5ad",
 )
-
-data = load_screen(
-    "screen.h5ad",
-    x_key="transformed",  # adata.layers["transformed"]
-    g_key="G",  # "G" (Default) = adata.obsm["G"]
-    control=None,
+fit = fit_screen(
+    data,
+    z_dim=12,
+    l_dim=100,
 )
-
-data = load_screen(
-    "screen.h5ad",
-    control="Nontargeting",  # drop the reference column
-    x_key="counts",  # adata.layers["counts"]
-    g_key="perturbations",  # adata.obsm["perturbations"]
+save_results(
+    fit,
+    result_dir,
 )
-
-data = residualize_screen(data)  # optional; only if you loaded covariates
-
-fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
 ```
 
-Same workflow from the CLI:
+This saves the fitted model and labeled result CSVs in `result_dir`.
+See the tutorials for plotting and enrichment.
 
-```bash
-perturbvi fit screen.h5ad \
-  --output results \
-  --z-dim 12 --l-dim 400 --tau 50
-```
+## Tutorials
 
-Omit `--control` when `G` is baseline-free; add `--control Nontargeting` when
-`G` keeps its reference column.
-
-```bash
-perturbvi analyze results
-```
-
-### Already have `X` and `G`? (arrays or CSV)
-
-`PerturbData` keeps expression, perturbations, and covariates aligned:
-
-| Argument | Shape | Contents |
-|---|---|---|
-| `X` | cells × genes | Normalized, scaled, or transformed expression |
-| `G` | cells × perturbations | Binary guide or target assignments |
-| `covariates` | cells × covariates | Variables whose effects should be removed from expression |
-| `control` | label | Reference column to drop from `G` (default: none) |
-
-```python
-from perturbvi import PerturbData, fit_screen, residualize_screen
-
-# control= drops the reference column; omit it when G is baseline-free
-data = PerturbData(
-    X=expression,
-    G=G,
-    covariates=covariates,
-    control="Nontargeting",
-)
-
-data = residualize_screen(data)  # optional
-
-fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
-```
-
-`X` and `G` are required and must list the same cells in the same row order.
-Read CSV/TSV with pandas first, then pass the DataFrames. `fit_screen()`
-centers expression; pass `standardize=True` to also scale each gene to unit
-variance. `control=` names the reference column to drop from `G`; omit it when
-`G` is already baseline-free.
-
-See the [Workflow](workflow.md) for complete input and analysis guidance and
-the [Input structure](input_structure.md) for where each piece of a screen
-lives in an AnnData file. The [Cookbook](cookbook.md#3-real-genetic-screens)
-covers real Datlinger, Norman, and Adamson screens.
-
-
-## Read next
-
-- [Workflow](workflow.md): constructing `X` and `G`, names, covariates,
-  fitting, saving, and analysis.
-- [Input structure](input_structure.md): AnnData layout for `X`, `G`, and
-  covariates.
-- [Cookbook](cookbook.md): real LUHMES, Datlinger, Adamson, Norman, and A375
-  10x examples.
-- [API](api.md): Python functions, CLI options, result tables, and saved files.
+- [LUHMES Analysis with PerturbVI](luhmes.md): fitting, factor and gene effects, and neuronal GO enrichment.
+- Replogle Analysis with PerturbVI: fitting and interpretation (coming soon).
+- [Using PerturbVI with Your Data](workflow.md): CSV and AnnData inputs, controls, covariates, and fitting.
+- [API](api.md): function arguments, result matrices, and CLI.
 
 ## Support
 

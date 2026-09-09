@@ -178,16 +178,16 @@ def _inner_loop(
     # update annotation priors if any
     params = annotation.update(params)
 
-    # update loadings prior precision via ~Empirical Bayes and update variational params
-    params = loadings.update_hyperparam(params)
+    # Learn precision from a data-informed posterior, including on iteration 1.
     params = loadings.update(X, factors, params)
+    params = loadings.update_hyperparam(params)
 
     # update factor parameters
     params = factors.update(X, guide, loadings, params)
 
     # update beta and p_hat
-    params = guide.update_hyperparam(params)
     params = guide.update(params)
+    params = guide.update_hyperparam(params)
 
     # update precision parameters via MLE
     params = _update_tau(X, factors, loadings, params)
@@ -220,7 +220,7 @@ def _init_params(
     # Random keys
     keys = random.split(rng_key, 8)
     keys[0].block_until_ready()
-    svd_key, mu_key, var_key, muw_key, varw_key, beta_key, var_beta_key, theta_key = keys
+    svd_key, mu_key, _, muw_key, _, beta_key, _, theta_key = keys
     vlog.info("✓ Random keys setup (10%)")
 
     # Data statistics
@@ -235,20 +235,24 @@ def _init_params(
 
     # Factors
     if init == "pca":
-        init_mu_z, _ = prob_pca(svd_key, X, k=z_dim)
+        init_mu_z, pca_w = prob_pca(svd_key, X, k=z_dim)
+        # Conditional factor covariance under the initial PCA reconstruction
+        # and the model's unit factor prior. No arbitrary variance floor.
+        precision_z = jnp.eye(z_dim) + tau * (pca_w @ pca_w.T)
+        init_var_z = jnp.linalg.solve(precision_z, jnp.eye(z_dim))
     else:
         init_mu_z = random.normal(mu_key, shape=(n_dim, z_dim))
+        init_var_z = jnp.eye(z_dim)
     init_mu_z.block_until_ready()
     vlog.info("✓ Factors initialized (35%)")
 
     # Factor variance
-    init_var_z = jnp.diag(random.normal(var_key, shape=(z_dim,)) ** 2)
     init_var_z.block_until_ready()
     vlog.info("✓ Factor variance set (45%)")
 
     # Loadings
     init_mu_w = random.normal(muw_key, shape=(l_dim, z_dim, p_dim)) * 1e-3
-    init_var_w = (1 / tau_0) * (random.normal(varw_key, shape=(l_dim, z_dim))) ** 2
+    init_var_w = 1 / tau_0
     init_mu_w.block_until_ready()
     init_var_w.block_until_ready()
     vlog.info("✓ Loadings initialized (60%)")
@@ -280,7 +284,7 @@ def _init_params(
         p_prior = None
         p_hat = jnp.ones((z_dim, g_dim))
     else:
-        init_var_beta = (1 / tau_beta) * random.normal(var_beta_key, shape=(g_dim, z_dim)) ** 2
+        init_var_beta = jnp.broadcast_to(1 / tau_beta, (g_dim, z_dim))
         p_prior = p_prior * jnp.ones(g_dim)
         p_hat = 0.5 * jnp.ones(shape=(z_dim, g_dim))
     tau_beta.block_until_ready()
@@ -597,14 +601,17 @@ def infer(
 
         vlog.info(f"Iter [{idx}] | {elbo_res}")
 
-        diff = elbo_res.elbo - elbo
+        value = float(elbo_res.elbo)
+        if not math.isfinite(value):
+            raise FloatingPointError(f"Nonfinite ELBO at iteration {idx}; inference cannot return a valid fit")
+        diff = value - elbo
         if diff < 0:
             vlog.info(f"Alert! Diff between elbo[{idx - 1}] and elbo[{idx}] = {diff}")
-        if jnp.fabs(diff) < tol:
+        if 0 <= diff < tol:
             log.info(f"Elbo diff tolerance reached at iteration {idx}")
             break
 
-        elbo = elbo_res.elbo
+        elbo = value
 
     # Compute PVE without changing the fitted factor order.
     pve = compute_pve(params)

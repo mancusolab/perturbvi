@@ -6,6 +6,7 @@ jinja2                          # necessary for mkdocs and mkdocs ecosystem
 mkdocs                          # Main documentation generator.
 mkdocs-material                 # Theme
 mkdocstrings[python]            # Autogenerate documentation from docstrings.
+griffe-pydantic                 # Pydantic schema extension configured in mkdocs.yml.
 mknotebooks                     # Turn Jupyter Lab notebooks into webpages.
 pydantic                        # data models
 pygments                        # syntax highlighting

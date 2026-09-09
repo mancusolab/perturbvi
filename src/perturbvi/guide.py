@@ -22,16 +22,17 @@ from .utils import kl_bernoulli
 
 
 def _update_sparse_beta(gdx, carry):
-    ZrG, gsq_diag, params = carry
+    residual, G, gsq_diag, params = carry
 
     # (t x k) (k x t)
-    mean_beta_g = params.mean_beta[gdx] * params.p_hat.T[gdx]
+    old_mean_beta_g = params.mean_beta[gdx] * params.p_hat.T[gdx]
+    column = _get_column(G, gdx)
 
     # add gth effect back across all K dim
-    ZrG = ZrG.at[:, gdx].set(ZrG[:, gdx] + gsq_diag[gdx] * mean_beta_g)
+    conditional = column @ residual + gsq_diag[gdx] * old_mean_beta_g
 
     var_beta_g = jnp.reciprocal(params.tau_beta + gsq_diag[gdx])
-    mean_beta_g = ZrG[:, gdx] * var_beta_g
+    mean_beta_g = conditional * var_beta_g
 
     eps = 1e-8
 
@@ -40,14 +41,27 @@ def _update_sparse_beta(gdx, carry):
     p_hat_g = jnp.clip(p_hat_g, eps, 1 - eps)
 
     # residualize based on newest estimates for downstream inf
-    ZrG = ZrG.at[:, gdx].set(ZrG[:, gdx] - gsq_diag[gdx] * (mean_beta_g * p_hat_g))
+    # Update the full observation residual so overlapping columns see the
+    # newest coefficient. This avoids allocating a dense guide Gram matrix.
+    residual = residual + column[:, None] * (old_mean_beta_g - mean_beta_g * p_hat_g)
     params = params._replace(
         mean_beta=params.mean_beta.at[gdx].set(mean_beta_g),
         var_beta=params.var_beta.at[gdx].set(var_beta_g),
         p_hat=params.p_hat.at[:, gdx].set(p_hat_g),
     )
 
-    return ZrG, gsq_diag, params
+    return residual, G, gsq_diag, params
+
+
+@dispatch
+def _get_column(G: Array, gdx) -> Array:
+    return G[:, gdx]
+
+
+@dispatch
+def _get_column(G: SparseMatrix, gdx) -> Array:
+    # A sparse matvec also handles duplicate BCOO entries and padded indices.
+    return G @ nn.one_hot(gdx, G.shape[1], dtype=G.matrix.dtype)
 
 
 @dispatch
@@ -69,7 +83,7 @@ def _update_dense_beta(G: Array, params: ModelParams) -> ModelParams:
     G_op = lx.MatrixLinearOperator(G)
 
     # Use lineax's CG solver
-    solver = lx.Normal(lx.CG(rtol=1e-6, atol=1e-6))
+    solver = lx.NormalCG(rtol=1e-6, atol=1e-6)
     out = _multi_linear_solve(G_op, params.mean_z, solver)
 
     # Updated beta
@@ -81,7 +95,7 @@ def _update_dense_beta(G: Array, params: ModelParams) -> ModelParams:
 @dispatch
 def _update_dense_beta(G: SparseMatrix, params: ModelParams) -> ModelParams:
     # Use lineax's CG solver
-    solver = lx.Normal(lx.CG(rtol=1e-6, atol=1e-6))
+    solver = lx.NormalCG(rtol=1e-6, atol=1e-6)
 
     out = jax.vmap(lambda b: lx.linear_solve(G, b, solver), in_axes=1)(params.mean_z)
 
@@ -134,14 +148,12 @@ class SparseGuideModel(GuideModel):
         return mean_term + var_term
 
     def update(self, params: ModelParams) -> ModelParams:
-        # compute E[Z'k]G: remove the g-th effect
-
-        # remove predicted mean
-        pred = self.predict(params)
-        ZrG = (params.mean_z - pred).T @ self.guide_data
+        residual = params.mean_z - self.predict(params)
 
         g_dim, _ = params.mean_beta.shape
-        _, _, params = lax.fori_loop(0, g_dim, _update_sparse_beta, (ZrG, self.gsq_diag, params))
+        _, _, _, params = lax.fori_loop(
+            0, g_dim, _update_sparse_beta, (residual, self.guide_data, self.gsq_diag, params)
+        )
 
         return params
 

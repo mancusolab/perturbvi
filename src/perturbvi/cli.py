@@ -102,15 +102,14 @@ def _add_fit_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_analyze_args(parser: argparse.ArgumentParser) -> None:
+def _add_lfsr_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("results_dir", help="Directory produced by perturbvi fit or save_results()")
-    parser.add_argument("--compute-lfsr", action="store_true", help="Compute and save LFSR")
-    parser.add_argument("--lfsr-iters", type=int, default=2000, help="Monte Carlo iterations (default: 2000)")
+    parser.add_argument("--draws", type=int, default=2000, help="Posterior draws (default: 2000)")
     parser.add_argument(
         "--seed",
         type=int,
         default=0,
-        help="LFSR random seed, used only with --compute-lfsr (default: 0)",
+        help="LFSR random seed (default: 0)",
     )
 
 
@@ -194,20 +193,17 @@ def _cmd_fit(args, log) -> None:
     log.info(f"Results saved to {args.output}")
 
 
-def _cmd_analyze(args, log) -> None:
-    from perturbvi.utils import analyze
+def _cmd_lfsr(args, log) -> None:
+    from perturbvi import estimate_lfsr
 
     results_dir = Path(args.results_dir)
-    tables = analyze(
+    LFSR_BW = estimate_lfsr(
         results_dir,
-        compute_lfsr=args.compute_lfsr,
-        lfsr_iters=args.lfsr_iters,
+        draws=args.draws,
         seed=args.seed,
     )
-    for name, table in tables.items():
-        destination = results_dir / f"{name}.csv"
-        table.to_csv(destination)
-        log.info(f"Saved {destination}")
+    LFSR_BW.to_csv(results_dir / "LFSR_BW.csv")
+    log.info(f"Saved LFSR_BW.csv to {results_dir}")
 
 
 def main(args=None):
@@ -225,8 +221,8 @@ def main(args=None):
         allow_abbrev=False,
     )
     _add_fit_args(fit_parser)
-    analyze_parser = subparsers.add_parser("analyze", help="Write labeled tables from a saved fit")
-    _add_analyze_args(analyze_parser)
+    lfsr_parser = subparsers.add_parser("lfsr", help="Compute and save overall-effect LFSR")
+    _add_lfsr_args(lfsr_parser)
     parsed = parser.parse_args(args)
 
     logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT)
@@ -238,7 +234,7 @@ def main(args=None):
         _setup_jax(parsed.device)
         _cmd_fit(parsed, log)
     else:
-        _cmd_analyze(parsed, log)
+        _cmd_lfsr(parsed, log)
 
 
 def run_cli():

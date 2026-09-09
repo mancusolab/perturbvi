@@ -1,7 +1,7 @@
 # API
 
 PerturbVI fits transformed cell-by-gene expression `X` together with a `0`/`1`
-cell-by-perturbation matrix `G`. See the [Workflow](workflow.md) for a
+cell-by-perturbation matrix `G`. See the [general guide](workflow.md) for a
 full example of both matrices.
 
 ## PerturbData
@@ -53,13 +53,15 @@ returns `PerturbData`. Expression comes from `adata.X` by default; `x_key=`
 selects a named layer. The binary perturbation matrix is read from
 `adata.obsm[g_key]` (default `"G"`) and must be a named pandas DataFrame whose
 rows match the expression matrix. See
-[Input structure](input_structure.md) for the full AnnData layout.
+[AnnData inputs](workflow.md#anndata) for the full AnnData layout.
 
 ```python
 from perturbvi import load_screen
 
-data = load_screen(adata)                     # adata.X + adata.obsm["G"]
-data = load_screen("screen.h5ad", covariates=["batch"], g_key="G")
+data = load_screen(
+    "screen.h5ad",
+    covariates=["batch"],
+)
 ```
 
 `obsm["G"]` is a PerturbVI storage convention. AnnData reserves no `obsm` keys;
@@ -71,7 +73,10 @@ If the stored G includes the reference column, pass its name to `control=` and
 the loader drops it before building `PerturbData`:
 
 ```python
-data = load_screen(adata, control="control")
+data = load_screen(
+    adata,
+    control="control",
+)
 ```
 
 `control=` is drop-only: the named column must exist or the loader raises. When
@@ -87,9 +92,8 @@ all-zero rows are biological controls.
 
 ::: perturbvi.fit_screen
 
-Passing covariates records the columns to regress out. PerturbVI does not
-choose them. With AnnData, pass their `obs` names, then residualize once before
-fitting:
+Pass the covariates you want removed from expression. With AnnData, use
+their `obs` column names. `fit_screen()` regresses them out before fitting:
 
 ```python
 data = load_screen(
@@ -98,8 +102,12 @@ data = load_screen(
     covariates=["batch", "percent_mito"],
 )
 
-data = residualize_screen(data)
-fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
+fit = fit_screen(
+    data,
+    z_dim=12,
+    l_dim=100,
+    tau=100,
+)
 ```
 
 The main model settings are:
@@ -113,63 +121,85 @@ The main model settings are:
 Numeric covariates are treated as measurements. Text, categorical, and boolean
 covariates are treated as groups. If a covariate overlaps with `G`, shared
 signal may be removed; perfectly confounded effects cannot be separated.
-The residualized `data` can be reused for multiple fits. `fit_screen()` centers
+To reuse corrected expression across fits, call `residualize_screen(data)`
+once and pass its result to `fit_screen()`. `fit_screen()` centers
 every gene. Set `standardize=True` to also scale genes to unit variance. It does not
 perform raw-count QC, normalization, gene selection, or guide calling. See
-[Workflow](workflow.md#3-choose-covariates-deliberately) for the full behavior.
+[Covariates](workflow.md#covariates) for the full behavior.
 
-## Save and analyze
+## Save results and compute LFSR
 
 ::: perturbvi.save_results
 
-::: perturbvi.load_results
+### Labeled matrices in memory
 
-::: perturbvi.utils.analyze
+`fit_screen()` returns a `FitResults` object. Access each matrix directly;
+there is no separate analysis step or dictionary of tables.
 
-```python
-save_results(fit, "results")
-tables = analyze(fit)
-```
-
-`analyze()` returns five DataFrames with row and column names. It does not
-write files:
-
-| Key | Shape | Meaning |
+| Property / CSV stem | Rows × columns | Meaning |
 |---|---|---|
-| `pip` | genes × programs | Probability that each gene contributes to each program |
-| `pve` | programs × 1 | Share of expression variation explained by each program |
-| `perturbation_effect` | perturbations × programs | Estimated effect of each perturbation on each program |
-| `perturbation_pip` | perturbations × programs | Probability that each perturbation affects each program |
-| `gene_effect` | genes × perturbations | Estimated effect of each perturbation on each gene |
+| `fit.W` / `W` | factors × genes | Inclusion-weighted posterior mean loadings |
+| `fit.PIP_W` / `PIP_W` | factors × genes | Gene-loading inclusion probabilities |
+| `fit.B` / `B` | perturbations × factors | Inclusion-weighted mean effects on factors |
+| `fit.PIP_B` / `PIP_B` | perturbations × factors | Coefficient inclusion probabilities |
+| `fit.BW` / `BW` | perturbations × genes | Overall effects, `B @ W` |
+| `fit.PVE` / `PVE` | factors × 1 | Per-factor expression variance summary |
 
-Local false sign rates (LFSR) can take substantial time, so they are computed
-only when requested:
+These properties return ordinary pandas DataFrames. They compute the requested
+matrix on access; they do not sample or write files. Store a matrix in a variable
+if you will reuse it. Raw arrays remain available through `fit.inference`.
 
 ```python
-tables = analyze(fit, compute_lfsr=True, lfsr_iters=2_000, seed=1)
-```
+from perturbvi import plotting as pp
 
-This adds one `lfsr` table. `analyze()` does not read an old LFSR file or
-compute LFSR unless `compute_lfsr=True`.
+fig = pp.plot_factor_effects(
+    fit.B,
+    perturbations=["ADNP", "PTEN", "SETD5"],
+    show_significance=False,
+    scale="asinh",
+)
+```
 
 ### Saved files
 
-`save_results()` writes four files:
+`save_results(fit, "results")` writes `model.pkl` and the six CSVs listed above.
+It does not sample LFSR or write duplicate TXT summaries. The saved model retains
+the fitted posterior and gene/perturbation names; plotting the CSVs does not
+require it. The fitting CLI also records fit arguments in `run_config.json`
+and input information in `input_summary.json`.
 
-| File | Contents |
-|---|---|
-| `W.txt` | Gene loadings for each program |
-| `pip.txt` | Probability that each gene contributes to each program |
-| `pve.txt` | Expression variation explained by each program |
-| `params_file.pkl` | Fitted parameters and labels |
+To regenerate summaries from a saved posterior without refitting:
 
-The CLI additionally writes `run_config.json` (the fit arguments, including
-covariates and the columns treated as categorical) and `input_summary.json`
-(expression and perturbation shapes plus gene and perturbation names) into the
-same directory for reproducible runs.
+```python
+from perturbvi import save_results
 
-`load_results()` reloads the fit from `params_file.pkl`. The three text files
-are provided for inspection and are not needed when reloading.
+save_results("results")
+```
+
+This refreshes the six CSVs and leaves an existing `model.pkl` and `LFSR_BW.csv`
+untouched. Older `params_file.pkl` fits are accepted internally. Files without
+saved labels use positional identifiers; the original gene and perturbation
+order is needed to relabel them.
+
+### Optional LFSR
+
+::: perturbvi.estimate_lfsr
+
+```python
+from perturbvi import estimate_lfsr
+
+LFSR_BW = estimate_lfsr(
+    "results",
+    draws=2_000,
+    seed=1,
+)
+LFSR_BW.to_csv("results/LFSR_BW.csv")
+```
+
+Replace `"results"` with `fit` to use the in-memory posterior. This samples
+only overall-effect sign uncertainty, returning perturbations on rows and
+genes on columns. It does not return or regenerate the six summary matrices.
+If LFSR has already been computed for this fit, read its CSV instead.
 
 ## CLI
 
@@ -177,19 +207,101 @@ Fit a prepared file whose binary matrix lives at `obsm["G"]`:
 
 ```bash
 perturbvi fit screen.h5ad \
-  --output results --z-dim 12 --l-dim 400 --tau 50
+  --output results --z-dim 12 --l-dim 100 --tau 100
 ```
 
 If `G` includes the reference column, pass `--control control`; the loader
 drops it before fitting. Expression can be selected with `--x-key <layer>`, and
 the perturbation key with `--g-key <obsm_key>` (default `"G"`).
 
-Write the five result tables, optionally adding LFSR:
+Fitting already writes the six result tables. Compute LFSR separately:
 
 ```bash
-perturbvi analyze results
-perturbvi analyze results --compute-lfsr --lfsr-iters 2000
+perturbvi lfsr results --draws 2000 --seed 1
 ```
+
+This command writes only `LFSR_BW.csv`.
+
+## Read result tables
+
+```python
+import pandas as pd
+
+BW = pd.read_csv("results/BW.csv", index_col=0)
+BW.head()
+```
+
+The CLI writes the same CSVs directly. Read `LFSR_BW.csv` only when LFSR was
+computed for this fit. Load only the matrices needed for the plot; each plotting
+function receives an individual DataFrame. If identifiers such as
+`001` or `NA` must remain strings, use pandas options such as `dtype={0: str}`
+and `keep_default_na=False` for the first column.
+
+## Plot interpretation tables
+
+Install Matplotlib for plotting:
+
+```bash
+uv pip install matplotlib
+```
+
+Each function accepts one labeled DataFrame and returns a Matplotlib Figure.
+Read the corresponding CSV directly, or pass `fit.B`, `fit.W`, or `fit.BW`.
+Full matrices and explicit subsets use the same functions. See the
+[LUHMES Analysis with PerturbVI](luhmes.md).
+
+Appearance options are `scale` (`"linear"` or `"asinh"`), `cmap`, and
+`colorbar_ticks`. Typography, spacing, and italic gene labels are automatic.
+By default, each colorbar has five markers evenly spaced along the displayed
+scale, including zero and both limits. Labels retain original units and are
+rounded to one decimal place. The displayed data determine the symmetric
+range. For an explicit override, supplied `colorbar_ticks` define the range
+using their largest absolute value. Use `ax` to compose plots and
+ordinary Matplotlib commands to customize the returned figure or axis labels.
+
+For gene heatmaps, `gene_annotations` accepts a DataFrame read directly from a
+CSV with `gene_ID`, `gene_name`, and `annotation` columns. No ordering index is
+needed. Genes are automatically grouped by annotation, with groups in first-seen
+CSV order and unannotated genes last. Supply
+`genes=annotations["gene_ID"].tolist()` to preserve CSV order within groups, or
+another gene list to choose the within-group order. Repeated annotations share
+a color and appear once in the two-column legend below the plot; annotation
+text is displayed verbatim.
+
+| Function | Required DataFrame | Optional uncertainty input | Significance rule |
+|---|---|---|---|
+| `plot_factor_effects(B, ...)` | `B`: perturbations × factors | `pip=PIP_B` | PIP > 0.95 |
+| `plot_gene_loadings(W, ...)` | `W`: factors × genes | `pip=PIP_W` | PIP > 0.95 |
+| `plot_gene_effects(BW, ...)` | `BW`: perturbations × genes | `lfsr=LFSR_BW` | LFSR < 0.05 |
+
+Dots are off by default (`show_significance=False`). Set the flag to `True`
+and supply the corresponding uncertainty matrix to show them. The effect and
+uncertainty matrices must have the same row and column identifiers; their
+order may differ. The plotting functions align them and handle display
+transposes internally. No model loading, file loading, or sampling occurs.
+
+```python
+from perturbvi import plotting as pp
+
+fig = pp.plot_gene_effects(
+    BW,
+    genes=genes,
+    perturbations=["ADNP", "PTEN", "SETD5"],
+    gene_annotations=annotations,
+    show_significance=False,
+    scale="asinh",
+)
+```
+
+::: perturbvi.plotting.plot_factor_effects
+
+::: perturbvi.plotting.plot_gene_loadings
+
+::: perturbvi.plotting.plot_gene_effects
+
+Selected matrices and color settings are recorded in `fig.perturbvi_data`,
+with one record per heatmap. Biological labels/groups are optional user-supplied
+tables. Enrichment and its visualization use direct R code in the tutorial.
 
 ## Using arrays directly
 

@@ -1,12 +1,24 @@
 [![Documentation](https://img.shields.io/badge/Docs-Available-brightgreen)](https://mancusolab.github.io/perturbvi/)
 [![PyPI](https://img.shields.io/pypi/v/perturbvi.svg)](https://pypi.org/project/perturbvi/)
+[![GitHub](https://img.shields.io/github/stars/mancusolab/perturbvi?style=social)](https://github.com/mancusolab/perturbvi)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Project generated with Hatch](https://img.shields.io/badge/%F0%9F%A5%9A-Hatch-4051b5.svg)](https://github.com/pypa/hatch)
 
 # PerturbVI
 
-Perturbvi is a scalable approach to infer regulatory modules through informative latent component model in the single-cell Perturb-seq data.
+PerturbVI infers latent gene programs and their perturbation effects from
+single-cell Perturb-seq data.
 
-## Install
+> [!NOTE]
+> For the preprint, please see: <br/>
+> *PerturbVI: A Scalable Latent Factor Model to Infer Genetic Regulatory Modules through CRISPR Perturbation Data*. <br/>
+> [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi) (placeholder DOI)
+
+> [!IMPORTANT]
+> To reproduce the analyses in the preprint: <br/>
+> [zenodo.org/records/0000000](https://zenodo.org/records/0000000) (placeholder)
+
+## Installation
 
 ```bash
 uv pip install perturbvi
@@ -14,110 +26,37 @@ uv pip install perturbvi
 
 ## Quick start
 
-### From AnnData (recommended)
-
-Prepare the file with transformed expression in `adata.X` and the binary
-perturbation matrix in `adata.obsm["G"]`, then load and fit:
+Prepare an H5AD file with transformed expression in `adata.X` and a binary,
+named perturbation DataFrame in `adata.obsm["G"]`.
 
 ```python
-from perturbvi import fit_screen, load_screen, residualize_screen
+from pathlib import Path
+from perturbvi import fit_screen, load_screen, save_results
 
+result_dir = Path("results/my_screen")
 data = load_screen(
-    "screen.h5ad",
-    x_key=None,  # None (Default) = adata.X
-    g_key="G",  # "G" (Default) = adata.obsm["G"]
-    control=None,
+    "data/screen.h5ad",
 )
-
-data = load_screen(
-    "screen.h5ad",
-    x_key="transformed",  # adata.layers["transformed"]
-    g_key="G",  # "G" (Default) = adata.obsm["G"]
-    control=None,
+fit = fit_screen(
+    data,
+    z_dim=12,
+    l_dim=100,
 )
-
-data = load_screen(
-    "screen.h5ad",
-    x_key="counts",  # adata.layers["counts"]
-    g_key="perturbations",  # adata.obsm["perturbations"]
-    control="Nontargeting",  # drop the reference column
+save_results(
+    fit,
+    result_dir,
 )
-
-data = residualize_screen(data)  # optional; only if you loaded covariates
-
-fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
 ```
 
-Same workflow from the CLI:
+This saves the fitted model and labeled result CSVs in `result_dir`.
+See the tutorials for plotting and enrichment.
 
-```bash
-perturbvi fit screen.h5ad \
-  --output results \
-  --z-dim 12 --l-dim 400 --tau 50
-```
+## Tutorials
 
-Omit `--control` when `G` is baseline-free; add `--control Nontargeting` when
-`G` keeps its reference column.
-
-```bash
-perturbvi analyze results
-```
-
-### Already have `X` and `G`? (arrays or CSV)
-
-`PerturbData` keeps expression, perturbations, and covariates aligned:
-
-| Argument | Shape | Contents |
-|---|---|---|
-| `X` | cells × genes | Normalized, scaled, or transformed expression |
-| `G` | cells × perturbations | Binary guide or target assignments |
-| `covariates` | cells × covariates | Variables whose effects should be removed from expression |
-| `control` | label | Reference column to drop from `G` (default: none) |
-
-```python
-from perturbvi import PerturbData, fit_screen, residualize_screen
-
-# control= drops the reference column; omit it when G is baseline-free
-data = PerturbData(
-    X=expression,
-    G=G,
-    covariates=covariates,
-    control="Nontargeting",
-)
-
-data = residualize_screen(data)  # optional
-
-fit = fit_screen(data, z_dim=12, l_dim=400, tau=50)
-```
-
-`X` and `G` are both required, and their rows must refer to the same cells in
-the same order. Read CSV/TSV files with pandas first, then pass the resulting
-DataFrames so gene and perturbation names stay aligned.
-
-`fit_screen()` always centers each gene across cells. If your expression is
-not already scaled, pass `standardize=True` to also divide each gene by its
-standard deviation, giving every gene unit variance.
-
-`control=` names a reference column in `G` to drop (for example
-`"Nontargeting"`). Omit it when `G` is already baseline-free.
-
-See the [Workflow](https://mancusolab.github.io/perturbvi/workflow/)
-for complete input and analysis guidance and the
-[Input structure](https://mancusolab.github.io/perturbvi/input_structure/)
-page for where each piece of a screen lives in an AnnData file. The
-[Cookbook](https://mancusolab.github.io/perturbvi/cookbook/#3-real-genetic-screens)
-for real Datlinger, Norman, and Adamson screens.
-
-## Documentation
-
-- [Workflow](https://mancusolab.github.io/perturbvi/workflow/): constructing
-  `X` and `G`, names, covariates, fitting, saving, and analysis.
-- [Input structure](https://mancusolab.github.io/perturbvi/input_structure/):
-  AnnData layout for `X`, `G`, and covariates.
-- [Cookbook](https://mancusolab.github.io/perturbvi/cookbook/): real LUHMES,
-  Datlinger, Adamson, Norman, and A375 10x examples.
-- [API](https://mancusolab.github.io/perturbvi/api/): Python functions, CLI
-  options, result tables, and saved files.
+- [LUHMES Analysis with PerturbVI](https://mancusolab.github.io/perturbvi/luhmes/): fitting, factor and gene effects, and neuronal GO enrichment.
+- Replogle Analysis with PerturbVI: fitting and interpretation (TBD).
+- [Using PerturbVI with Your Data](https://mancusolab.github.io/perturbvi/workflow/): CSV and AnnData inputs, controls, covariates, and fitting.
+- [API](https://mancusolab.github.io/perturbvi/api/): function arguments, result matrices, and CLI.
 
 ## Support
 
