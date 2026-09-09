@@ -2,8 +2,10 @@
 
 Fit the LUHMES screen, plot perturbation effects and gene loadings, then
 examine neuronal GO enrichment in factor-associated genes.
-Already have fitted results? Start with [the result files](#3-understand-the-files)
-and [plotting setup](#4-set-up-plotting).
+
+!!! important
+    To reproduce the analyses in the preprint: <br/>
+    [zenodo.org/records/0000000](https://zenodo.org/records/0000000) (placeholder)
 
 The example uses processed data from the
 [Lalli et al. LUHMES screen](https://doi.org/10.1101/gr.262295.120), used in
@@ -17,7 +19,7 @@ Use your own gene selections and annotations to apply the plotting workflow
 to another screen. The [general guide](workflow.md) covers other input formats
 and perturbation designs.
 
-For installation, see [Install PerturbVI](index.md#install).
+For installation, see [Install PerturbVI](index.md#installation).
 
 ## 1. Prepare the LUHMES inputs
 
@@ -62,7 +64,7 @@ from perturbvi import PerturbData, fit_screen, save_results
 jax.config.update("jax_enable_x64", True)
 
 data_dir = Path("luhmes")
-result_dir = Path("perturbvi_results")
+result_dir = Path("luhmes_out")
 expression = pd.read_csv(data_dir / "luhmes_exp.csv", index_col=0)
 G = pd.read_csv(data_dir / "luhmes_G.csv", index_col=0)
 data = PerturbData(
@@ -110,10 +112,10 @@ LFSR (local false sign rate) measures uncertainty in an overall effect's sign.
 Compute it for DEG counts or optional significance dots:
 
 ```bash
-perturbvi lfsr perturbvi_results --draws 2000 --seed 2026
+perturbvi lfsr luhmes_out --draws 2000 --seed 2026
 ```
 
-The supplied `perturbvi_results/` folder also contains `gene_annotations.csv`
+The supplied `luhmes_out/` folder also contains `gene_annotations.csv`
 and enrichment results. For a new fit, provide annotations as described below
 and run the enrichment section. Reuse an existing LFSR CSV only for its matching fit.
 
@@ -126,7 +128,7 @@ uv pip install matplotlib
 ```
 
 Set `result_dir` to your fitted result directory. The examples below use
-`perturbvi_results/`; figures are saved separately in `figures/`.
+`luhmes_out/`; figures are saved separately in `figures/`.
 
 ```python
 from pathlib import Path
@@ -134,7 +136,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from perturbvi import plotting as pp
 
-result_dir = Path("perturbvi_results")
+result_dir = Path("luhmes_out")
 figure_dir = Path("figures")
 figure_dir.mkdir(parents=True, exist_ok=True)
 
@@ -438,7 +440,7 @@ install.packages(c("WebGestaltR", "ggplot2", "cowplot", "RColorBrewer",
 Create one foreground gene list per factor from `PIP_W.csv`:
 
 ```r
-result_dir <- "perturbvi_results"
+result_dir <- "luhmes_out"
 PIP_W <- read.csv(
   file.path(result_dir, "PIP_W.csv"),
   row.names = 1,
@@ -509,7 +511,7 @@ Use ggplot2 and cowplot to show fold enrichment as bar length and −log10(FDR)
 as color. Load the supplied results, or use the `enrichment` table created above:
 
 ```r
-enrichment <- read.csv("perturbvi_results/enrichment/factor_go.csv")
+enrichment <- read.csv("luhmes_out/enrichment/factor_go.csv")
 ```
 
 Select neuronal terms **after** ORA and Benjamini–Hochberg (BH) correction
