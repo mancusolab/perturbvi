@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pickle
-from pathlib import Path
 
-from jax.experimental import enable_x64
+from pathlib import Path
 
 from .screen import FitResults
 
@@ -17,8 +16,7 @@ def _posterior(results):
         model_file = directory / "model.pkl"
         if not model_file.exists():
             model_file = directory / "params_file.pkl"
-        # Preserve saved float64 JAX arrays even when the caller disables x64.
-        with model_file.open("rb") as stream, enable_x64():
+        with model_file.open("rb") as stream:
             payload = pickle.load(stream)
         if isinstance(payload, dict) and "params" in payload:
             params = payload["params"]

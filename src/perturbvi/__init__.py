@@ -1,5 +1,7 @@
 from importlib.metadata import PackageNotFoundError, version  # pragma: no cover
 
+import jax
+
 from .infer import (
     compute_elbo as compute_elbo,
     compute_pip as compute_pip,
@@ -12,6 +14,9 @@ from .loaders import load_screen as load_screen
 from .preprocess import residualize_screen as residualize_screen
 from .screen import fit_screen as fit_screen, FitResults as FitResults, PerturbData as PerturbData
 from .sim import generate_sim as generate_sim
+
+
+jax.config.update("jax_enable_x64", True)
 
 
 __all__ = (
