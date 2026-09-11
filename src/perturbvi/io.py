@@ -4,9 +4,6 @@ import pickle
 
 from pathlib import Path
 
-import numpy as np
-from jax.experimental import enable_x64
-
 from .infer import InferResults
 from .log import get_logger
 from .screen import FitResults
@@ -45,10 +42,9 @@ def save_results(
     if not isinstance(results, FitResults):
         params, genes, perturbations = _posterior(results)
         if source is not None:
-            with enable_x64(np.asarray(params.mean_w).dtype == np.dtype("float64")):
-                results = InferResults(
-                    params=params, elbo=None, pip=compute_pip(params), pve=compute_pve(params),
-                )
+            results = InferResults(
+                params=params, elbo=None, pip=compute_pip(params), pve=compute_pve(params),
+            )
         results = FitResults(results, genes, perturbations)
 
     output.mkdir(parents=True, exist_ok=True)

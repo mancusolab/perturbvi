@@ -168,10 +168,7 @@ class FitResults:
     @property
     def W(self) -> pd.DataFrame:
         """Inclusion-weighted posterior mean loadings: factors by genes."""
-        from jax.experimental import enable_x64
-
-        with enable_x64(np.asarray(self.params.mean_w).dtype == np.dtype("float64")):
-            values = np.asarray(self.params.W)
+        values = np.asarray(self.params.W)
         return pd.DataFrame(values, index=self._factor_index, columns=self.gene_names)
 
     @property

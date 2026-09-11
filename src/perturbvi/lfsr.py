@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import numbers
+
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
 from jax import random
-from jax.experimental import enable_x64
 
 from ._results import _posterior
 from .infer import InferResults
@@ -46,8 +47,7 @@ def estimate_lfsr(
         raise ValueError("seed must be an integer")
 
     params, genes, perturbations = _posterior(results)
-    with enable_x64(np.asarray(params.mean_w).dtype == np.dtype("float64")):
-        values = compute_lfsr(random.PRNGKey(seed), params, iters=draws)
+    values = compute_lfsr(random.PRNGKey(seed), params, iters=draws)
     return pd.DataFrame(
         np.asarray(values),
         index=pd.Index(perturbations, name="perturbation_id"),
