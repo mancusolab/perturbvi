@@ -156,7 +156,6 @@ fig = pp.plot_factor_effects(
     fit.B,
     perturbations=["ADNP", "PTEN", "SETD5"],
     show_significance=False,
-    scale="asinh",
 )
 ```
 
@@ -250,14 +249,14 @@ Read the corresponding CSV directly, or pass `fit.B`, `fit.W`, or `fit.BW`.
 Full matrices and explicit subsets use the same functions. See the
 [LUHMES Analysis with PerturbVI](luhmes.ipynb).
 
-Appearance options are `scale` (`"linear"` or `"asinh"`), `cmap`, and
-`colorbar_ticks`. Typography, spacing, and italic gene labels are automatic.
-By default, each colorbar has five markers evenly spaced along the displayed
-scale, including zero and both limits. Labels retain original units and are
-rounded to one decimal place. The displayed data determine the symmetric
-range. For an explicit override, supplied `colorbar_ticks` define the range
-using their largest absolute value. Use `ax` to compose plots and
-ordinary Matplotlib commands to customize the returned figure or axis labels.
+Appearance options are `cmap` and `colorbar_ticks`. Typography, spacing, and
+italic gene labels are automatic. By default, each colorbar has five markers
+evenly spaced along the colorbar, including zero and both limits. Labels retain
+original units and are rounded to one decimal place. The displayed data
+determine the symmetric range. For an explicit override, supplied
+`colorbar_ticks` define the range using their largest absolute value. Use `ax`
+to compose plots and ordinary Matplotlib commands to customize the returned
+figure or axis labels.
 
 For gene heatmaps, `gene_annotations` accepts a DataFrame read directly from a
 CSV with `gene_ID`, `gene_name`, and `annotation` columns. No ordering index is
@@ -289,7 +288,6 @@ fig = pp.plot_gene_effects(
     perturbations=["ADNP", "PTEN", "SETD5"],
     gene_annotations=annotations,
     show_significance=False,
-    scale="asinh",
 )
 ```
 

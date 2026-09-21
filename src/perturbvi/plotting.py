@@ -116,10 +116,8 @@ def _annotation(matrix, metadata):
     return matrix, labels, np.array(row_colors), legend
 
 
-def _normalization(matrix, scale, ticks):
+def _normalization(matrix, ticks):
     _, colors = _matplotlib()
-    if scale not in {"linear", "asinh"}:
-        raise ValueError("scale must be 'linear' or 'asinh'")
     limit = max(float(np.max(np.abs(matrix.to_numpy()))), 1e-12)
     if ticks is not None:
         ticks = np.asarray(ticks, dtype=float)
@@ -127,13 +125,7 @@ def _normalization(matrix, scale, ticks):
                 or np.any(np.diff(ticks) <= 0)):
             raise ValueError("colorbar_ticks must be increasing and finite")
         limit = float(np.max(np.abs(ticks)))
-    if scale == "asinh":
-        # Fixed transition used by the default heatmap style; no width setting
-        # is required from the caller. Legend labels remain in original units.
-        norm = colors.FuncNorm((lambda x: np.arcsinh(x / .03),
-                                lambda x: .03 * np.sinh(x)), vmin=-limit, vmax=limit)
-    else:
-        norm = colors.Normalize(vmin=-limit, vmax=limit)
+    norm = colors.Normalize(vmin=-limit, vmax=limit)
     if ticks is None:
         ticks = np.asarray(norm.inverse(np.linspace(0, 1, 5)))
         ticks[2] = 0
@@ -170,14 +162,14 @@ def _legend(fig, bounds, entries, title, columns, family, size, row_heights):
 
 
 def _heatmap(matrix, mask, *, row_labels, column_labels, row_colors=None, groups=(),
-             scale="linear", colorbar_ticks=None, cmap=None, ax=None,
+             colorbar_ticks=None, cmap=None, ax=None,
              colorbar_label="Effect size", xlabel="", ylabel="",
              italic_rows=True, italic_columns=False):
     plt, colors = _matplotlib()
     font_family = plt.rcParams["font.family"][0]
     fontsize, label_size, label_rotation = 9, 7.5, 60
     annotation_title, annotation_columns, annotation_size = "Gene annotation", 2, 7
-    norm, limit, ticks = _normalization(matrix, scale, colorbar_ticks)
+    norm, limit, ticks = _normalization(matrix, colorbar_ticks)
     colormap = (colors.LinearSegmentedColormap.from_list("perturbvi_effect", _EFFECT_COLORS, N=257)
                 if cmap is None else plt.get_cmap(cmap) if isinstance(cmap, str) else cmap)
     nrows, ncols = matrix.shape
@@ -189,8 +181,7 @@ def _heatmap(matrix, mask, *, row_labels, column_labels, row_colors=None, groups
     top = col_extent + .13
     left = .26 if ylabel else .08
     strip = .17 if row_colors is not None else 0
-    key_width = max(.52, _measure(colorbar_label, 7, font_family)[0] + .02,
-                    _measure("asinh scale", 7, font_family)[0] + .02 if scale == "asinh" else 0)
+    key_width = max(.52, _measure(colorbar_label, 7, font_family)[0] + .02)
     right = strip + label_width + .10 + key_width + .09
     # Display annotation text verbatim, including any user-supplied line breaks.
     legend_row_heights = [.15 + .11 * (max(label.count("\n") + 1 for label, _ in groups[i:i + annotation_columns]) - 1)
@@ -276,9 +267,6 @@ def _heatmap(matrix, mask, *, row_labels, column_labels, row_colors=None, groups
                  fontsize=6.5, color=_INK, family=font_family)
     key.text(0, 1 + .09 / key_length, colorbar_label, ha="left", va="bottom", transform=key.transAxes,
              fontsize=7, color=_INK, family=font_family)
-    if scale == "asinh":
-        key.text(0, -.12 / key_length, "asinh scale", ha="left", va="top", transform=key.transAxes,
-                 fontsize=7, color=_INK, family=font_family)
     # Triangular caps make explicit color saturation visible.
     from matplotlib.patches import Polygon
 
@@ -290,7 +278,7 @@ def _heatmap(matrix, mask, *, row_labels, column_labels, row_colors=None, groups
     info = {"matrix": matrix.copy(), "significant": None if mask is None else mask.copy(),
             "row_labels": row_labels, "column_labels": column_labels,
             "shown_row_indices": ri.tolist(), "shown_column_indices": ci.tolist(),
-            "scale": scale, "asinh_transition": .03 if scale == "asinh" else None, "color_limit": limit,
+            "color_limit": limit,
             "colorbar_ticks": ticks.tolist(), "saturated_low": bool(low), "saturated_high": bool(high)}
     ax.perturbvi_data = info
     if not hasattr(fig, "perturbvi_data"):
@@ -307,7 +295,6 @@ def plot_factor_effects(
     perturbations: Sequence | None = None,
     factors: Sequence | None = None,
     show_significance: bool = False,
-    scale: str = "linear",
     cmap=None,
     colorbar_ticks: Sequence | None = None,
     ax=None,
@@ -324,8 +311,7 @@ def plot_factor_effects(
     Supplying ``pip`` alone does not enable dots. Probabilities are aligned by
     identifiers; their row and column order need not match ``B``.
 
-    Choose ``scale='linear'`` or ``scale='asinh'`` (asinh(x / 0.03)). Legend
-    labels retain original units. ``cmap`` accepts a Matplotlib colormap name
+    Legend labels retain original units. ``cmap`` accepts a Matplotlib colormap name
     or object. By default, five markers are evenly spaced on the displayed
     scale, including zero and both limits, with labels rounded to one
     decimal place. The symmetric color range covers the displayed values;
@@ -341,7 +327,7 @@ def plot_factor_effects(
     mask = _mask(B, pip, "pip", matrix, .95 if show_significance else None, "greater")
     return _heatmap(matrix, mask, row_labels=_labels(matrix.index),
                     column_labels=_labels(matrix.columns, factors=True),
-                    scale=scale, cmap=cmap, colorbar_ticks=colorbar_ticks, ax=ax,
+                    cmap=cmap, colorbar_ticks=colorbar_ticks, ax=ax,
                     xlabel="Factors", ylabel="Perturbations")
 
 
@@ -353,7 +339,6 @@ def plot_gene_loadings(
     factors: Sequence | None = None,
     gene_annotations: pd.DataFrame | None = None,
     show_significance: bool = False,
-    scale: str = "linear",
     cmap=None,
     colorbar_ticks: Sequence | None = None,
     ax=None,
@@ -376,7 +361,7 @@ def plot_gene_loadings(
     Annotation text labels the two-column bottom legend verbatim, with no
     automatic wrapping. Gene names are italic automatically.
 
-    Scale and returned Figure follow :func:`plot_factor_effects`. Omitting
+    Returned Figure follows :func:`plot_factor_effects`. Omitting
     selections includes every gene and factor. Dense labels may be thinned;
     all selected cells remain present in ``fig.perturbvi_data``.
     """
@@ -386,7 +371,7 @@ def plot_gene_loadings(
     mask = _mask(W, pip, "pip", matrix, .95 if show_significance else None, "greater", transpose=True)
     return _heatmap(matrix, mask, row_labels=rows,
                     column_labels=_labels(matrix.columns, factors=True),
-                    row_colors=row_colors, groups=groups, scale=scale, cmap=cmap,
+                    row_colors=row_colors, groups=groups, cmap=cmap,
                     colorbar_ticks=colorbar_ticks, ax=ax, colorbar_label="Gene loading",
                     xlabel="Factors", ylabel="Genes")
 
@@ -399,7 +384,6 @@ def plot_gene_effects(
     perturbations: Sequence | None = None,
     gene_annotations: pd.DataFrame | None = None,
     show_significance: bool = False,
-    scale: str = "linear",
     cmap=None,
     colorbar_ticks: Sequence | None = None,
     ax=None,
@@ -427,6 +411,6 @@ def plot_gene_effects(
     mask = _mask(BW, lfsr, "lfsr", matrix, .05 if show_significance else None, "less", transpose=True)
     return _heatmap(matrix, mask, row_labels=rows,
                     column_labels=_labels(matrix.columns),
-                    row_colors=row_colors, groups=groups, scale=scale, cmap=cmap,
+                    row_colors=row_colors, groups=groups, cmap=cmap,
                     colorbar_ticks=colorbar_ticks, ax=ax, colorbar_label="Overall effect",
                     xlabel="Perturbations", ylabel="Genes", italic_columns=True)
