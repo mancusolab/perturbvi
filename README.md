@@ -33,7 +33,7 @@ named perturbation DataFrame in `adata.obsm["G"]`.
 from pathlib import Path
 from perturbvi import fit_screen, load_screen, save_results
 
-result_dir = Path("results/my_screen")
+result_dir = Path("results")
 screen = load_screen("data/screen.h5ad")
 
 fit = fit_screen(
