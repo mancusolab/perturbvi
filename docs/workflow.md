@@ -26,13 +26,8 @@ result_dir = Path("results")
 | `G` | Cells × perturbations | Binary target or guide assignments |
 | `covariates`, optional | Cells × covariates | Variables to regress out of expression |
 
-Keep cells in the same order in every input. Use unique gene and perturbation
-names for the columns. If you have gene annotations, their IDs must match
-the expression matrix.
-
-Before fitting, filter low-quality cells and genes, normalize expression,
-select genes, and assign perturbations to cells. PerturbVI expects these steps
-to be complete.
+Keep cells in the same order in every input, with unique gene and perturbation
+names.
 
 ### Controls and multiple perturbations
 
@@ -46,10 +41,9 @@ multiple perturbations have multiple 1s:
 | RUNX1T1 | 0 | 1 |
 | CEBPE + RUNX1T1 | 1 | 1 |
 
-If `G` has a control column, `control="Nontargeting"` removes that column
-while keeping the control cells. Without this option, the control column is
-fitted like any other perturbation. If control cells already have all-zero
-rows, leave `control` unset.
+If `G` has a control column, `control="Nontargeting"` drops that column so the
+control is not fitted as a perturbation; the control cells stay as all-zero
+rows and serve as the baseline.
 
 ### CSV or TSV
 
@@ -108,11 +102,9 @@ from `adata.obsm["perturbations"]`, set `g_key="perturbations"`.
 ### Covariates
 
 Pass covariates such as batch or mitochondrial percentage to adjust expression
-before fitting. `fit_screen()` performs the regression automatically.
-
-Numeric columns are treated as continuous values; text, categorical, and
-boolean columns define groups. For batches numbered 1, 2, 3, and so on,
-convert the column to `category`.
+before fitting; `fit_screen()` performs the regression. Numeric columns are
+continuous, while text, categorical, and boolean columns define groups, so
+convert numbered batches to `category`.
 
 ??? example "Covariates from AnnData or a CSV"
     With AnnData, provide column names from `adata.obs`:
@@ -137,16 +129,64 @@ convert the column to `category`.
     )
     ```
 
-If a covariate is confounded with perturbation, correcting for it can also
-remove the perturbation signal. Skip correction if it has already been done.
-
 ## 3. Dataset examples
 
-Choose an example that matches your screen, then continue to
-[fit and save](#4-fit-and-save). Each example creates `data` and `result_dir`.
+??? example "Replogle K562: genome-scale screen"
+    ```python
+    from pathlib import Path
 
-Download the Datlinger, Adamson, or Norman H5AD files from
-[scPerturb](https://github.com/sanderlab/scPerturb) into `data_dir`.
+    import anndata as ad
+    import jax.numpy as jnp
+    import pandas as pd
+    from jax import config
+    from jax.experimental import sparse
+
+    from perturbvi import PerturbData, estimate_lfsr, fit_screen, save_results
+
+    config.update("jax_enable_x64", True)
+    config.update("jax_default_matmul_precision", "highest")
+
+    Z_DIM, L_DIM, TAU, INIT = 20, 1000, 1, "pca"
+
+    DATA = Path("input")
+    MATRIX = DATA / "K562_essential_resid.h5ad.gzip"
+    GUIDE = DATA / "wide_df.csv"
+    BACKGROUND = DATA / "K562_essential_downstream_gene.tsv"
+    OUTPUT = Path("results")
+    DROP_COLS = ["non-targeting", "cell_barcode"]
+
+    adata = ad.read_h5ad(MATRIX)
+    guides = pd.read_csv(GUIDE, index_col=0)
+    guides = guides.drop(columns=DROP_COLS, errors="ignore")
+    background_genes = pd.read_csv(BACKGROUND, sep="\t")["gene_id"].tolist()
+
+    screen = PerturbData(
+        X=jnp.asarray(adata.X, dtype=jnp.float64),
+        G=sparse.bcoo_fromdense(jnp.asarray(guides.to_numpy(), dtype=jnp.float64)),
+        gene_names=background_genes,
+        perturbation_names=guides.columns.tolist(),
+    )
+
+    del adata, guides
+
+    fit = fit_screen(
+        screen,
+        z_dim=Z_DIM,
+        l_dim=L_DIM,
+        tau=TAU,
+        init=INIT,
+        p_prior=0.1,
+        standardize=True,
+        tol=1e-2,
+        max_iter=1000,
+    )
+
+    save_results(fit, OUTPUT)
+    del fit
+
+    lfsr_bw = estimate_lfsr(OUTPUT)
+    lfsr_bw.to_csv(OUTPUT / "LFSR_BW.csv")
+    ```
 
 ??? example "Preprocess raw counts"
     Install Scanpy and define this function before running an example:
@@ -190,9 +230,8 @@ Download the Datlinger, Adamson, or Norman H5AD files from
         return adata
     ```
 
-    This filters cells and genes, selects up to 6,000 genes by Pearson-residual
-    variance, and replaces `adata.X` with Pearson residuals. Adjust QC thresholds
-    for your screen. The `MT-` rule assumes human gene symbols in `var_names`.
+Filters cells and genes, selects up to 6,000 genes by Pearson-residual
+variance, and replaces `adata.X` with Pearson residuals.
 
 ??? example "Datlinger CROP-seq: one target per cell"
     In the [Datlinger dataset](https://www.nature.com/articles/nmeth.4177),
@@ -240,10 +279,9 @@ Download the Datlinger, Adamson, or Norman H5AD files from
     ```
 
 ??? example "Norman CRISPRa: single targets and target pairs"
-    In the [Norman dataset](https://doi.org/10.1126/science.aax4438), split
-    target-pair labels such as `CEBPE_RUNX1T1` into two active columns.
-    Controls have all-zero rows, as in the table above. This models additive
-    target effects; it does not add interaction terms.
+In the [Norman dataset](https://doi.org/10.1126/science.aax4438), split
+target-pair labels such as `CEBPE_RUNX1T1` into two columns; controls have
+all-zero rows.
 
     ```python
     adata = ad.read_h5ad(data_dir / "NormanWeissman2019_filtered.h5ad")

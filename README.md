@@ -11,12 +11,13 @@ single-cell Perturb-seq data.
 
 > [!NOTE]
 > For the preprint, please see: <br/>
-> *PerturbVI: A Scalable Latent Factor Model to Infer Genetic Regulatory Modules through CRISPR Perturbation Data*. <br/>
-> [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi)
+> *PerturbVI: scalable inference of genetic regulatory modules from single-cell CRISPR perturbation screens*. <br/>
+> bioRxiv [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi)
 
 > [!IMPORTANT]
 > To reproduce the analyses: <br/>
-> [https://github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis)
+> Code: [https://github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis) <br/>
+> Data: [10.5281/zenodo.23106975](https://doi.org/10.5281/zenodo.23106975)
 
 ## Installation
 
@@ -26,8 +27,8 @@ uv pip install perturbvi
 
 ## Quick start
 
-Prepare an H5AD file with transformed expression in `adata.X` and a binary,
-named perturbation DataFrame in `adata.obsm["G"]`.
+Prepare an H5AD with transformed expression in `adata.X` and a binary
+perturbation matrix in `adata.obsm["G"]`.
 
 ```python
 from pathlib import Path
@@ -45,22 +46,20 @@ fit = fit_screen(
 
 save_results(fit, result_dir)
 ```
-
-This saves the fitted model and labeled result CSVs in `result_dir`.
-See the tutorials for plotting and enrichment.
+See the tutorials for detailed analysis.
 
 ## Tutorials
 
 - [LUHMES Analysis with PerturbVI](https://mancusolab.github.io/perturbvi/luhmes/): fitting, factor and gene effects, and neuronal GO enrichment.
-- Replogle Analysis with PerturbVI: fitting and interpretation (TBD).
 - [Using PerturbVI with Your Data](https://mancusolab.github.io/perturbvi/workflow/): CSV and AnnData inputs, controls, covariates, and fitting.
 - [API](https://mancusolab.github.io/perturbvi/api/): function arguments, result matrices, and CLI.
 
 ## Support
 
 Please report bugs or feature requests in the
-[issue tracker](https://github.com/mancusolab/perturbvi/issues). For questions
-or comments, contact Abdullah Al Nahid (<alnahid@usc.edu>) or Nicholas Mancuso
+[issue tracker](https://github.com/mancusolab/perturbvi/issues).
+<br/>
+For questions or comments, contact Abdullah Al Nahid (<alnahid@usc.edu>) or Nicholas Mancuso
 (<nmancuso@usc.edu>).
 
 ## Other Software
