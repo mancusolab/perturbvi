@@ -3,27 +3,21 @@ hide:
   - toc
 ---
 
-[![Documentation](https://img.shields.io/badge/Docs-Available-brightgreen)](https://mancusolab.github.io/perturbvi/)
-[![PyPI](https://img.shields.io/pypi/v/perturbvi.svg)](https://pypi.org/project/perturbvi/)
-[![GitHub](https://img.shields.io/github/stars/mancusolab/perturbvi?style=social)](https://github.com/mancusolab/perturbvi)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Project generated with Hatch](https://img.shields.io/badge/%F0%9F%A5%9A-Hatch-4051b5.svg)](https://github.com/pypa/hatch)
-
 # PerturbVI
 
 PerturbVI infers latent gene programs and their perturbation effects from
 single-cell Perturb-seq data.
 
-> [!NOTE]
-> For the preprint, please see: <br/>
-> *PerturbVI: scalable inference of genetic regulatory modules from single-cell CRISPR perturbation screens*. <br/>
-> bioRxiv [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi)
+!!! note
+    For the preprint, please see: <br/>
+    *PerturbVI: scalable inference of genetic regulatory modules from single-cell CRISPR perturbation screens*. <br/>
+    bioRxiv [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi)
 
-> [!IMPORTANT]
-> To reproduce the analyses: <br/>
-> Analysis: [https://github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis) <br/>
-> Documentation: [https://mancusolab.github.io/perturbvi](https://mancusolab.github.io/perturbvi) <br/>
-> Data: [10.5281/zenodo.23123136](https://doi.org/10.5281/zenodo.23123136)
+!!! important
+    To reproduce the analyses: <br/>
+    Analysis: [https://github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis) <br/>
+    Documentation: [https://mancusolab.github.io/perturbvi](https://mancusolab.github.io/perturbvi) <br/>
+    Data: [10.5281/zenodo.23123136](https://doi.org/10.5281/zenodo.23123136)
 
 ## Installation
 
