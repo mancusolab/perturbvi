@@ -149,7 +149,7 @@ convert numbered batches to `category`.
     Z_DIM, L_DIM, TAU, INIT = 20, 1000, 1, "pca"
 
     DATA = Path("input")
-    MATRIX = DATA / "K562_essential_resid.h5ad.gzip"
+    MATRIX = DATA / "K562_essential_resid.h5ad"
     GUIDE = DATA / "wide_df.csv"
     BACKGROUND = DATA / "K562_essential_downstream_gene.tsv"
     OUTPUT = Path("results")
