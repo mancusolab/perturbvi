@@ -5,17 +5,15 @@ hide:
 
 # PerturbVI
 
-PerturbVI infers latent gene programs and their perturbation effects from
-single-cell Perturb-seq data.
+PerturbVI infers latent gene programs and their perturbation effects from single-cell Perturb-seq data.
 
 !!! note
     For the preprint, please see: <br/>
-    *PerturbVI: scalable inference of genetic regulatory modules from single-cell CRISPR perturbation screens*. <br/>
+    *PerturbVI: scalable inference of gene programs from single-cell CRISPR perturbation data*. <br/>
     bioRxiv [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi)
 
 !!! important
-    To reproduce the analyses: <br/>
-    [github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis) <br/>
+    Analysis: [github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis) <br/>
     Documentation: [mancusolab.github.io/perturbvi](https://mancusolab.github.io/perturbvi) <br/>
     Data: [doi.org/10.34728/FK2/TM9ELW](https://doi.org/10.34728/FK2/TM9ELW)
 

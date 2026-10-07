@@ -14,8 +14,7 @@ PerturbVI infers latent gene programs and their perturbation effects from single
 > bioRxiv [doi.org/10.0000/perturbvi](https://doi.org/10.0000/perturbvi)
 
 > [!IMPORTANT]
-> To reproduce the analyses: <br/>
-> [github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis) <br/>
+> Analysis: [github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis) <br/>
 > Documentation: [mancusolab.github.io/perturbvi](https://mancusolab.github.io/perturbvi) <br/>
 > Data: [doi.org/10.34728/FK2/TM9ELW](https://doi.org/10.34728/FK2/TM9ELW)
 
