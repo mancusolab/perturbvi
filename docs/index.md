@@ -15,7 +15,7 @@ single-cell Perturb-seq data.
 
 !!! important
     To reproduce the analyses: <br/>
-    Analysis: [github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis) <br/>
+    [github.com/mancusolab/perturbvi_analysis](https://github.com/mancusolab/perturbvi_analysis) <br/>
     Documentation: [mancusolab.github.io/perturbvi](https://mancusolab.github.io/perturbvi) <br/>
     Data: [doi.org/10.34728/FK2/TM9ELW](https://doi.org/10.34728/FK2/TM9ELW)
 
