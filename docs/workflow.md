@@ -76,29 +76,40 @@ the remaining `G`. If you already removed the control column, omit `control`:
 screen = PerturbData(X=X, G=G)
 ```
 
-??? example "Add covariates"
-    Load covariates with the same cell IDs and row order as `X` and `G`, then
-    pass the DataFrame to `PerturbData`:
+<details markdown="1">
+<summary>Add covariates</summary>
 
-    ```python
-    covariates = pd.read_csv(data_dir / "covariates.csv", index_col=0)
-    covariates["batch"] = covariates["batch"].astype("category")
+Load covariates with the same cell IDs and row order as `X` and `G`, then
+pass the DataFrame to `PerturbData`:
 
-    screen = PerturbData(
-        X=X,
-        G=G,
-        control="Nontargeting",
-        covariates=covariates,
-    )
-    ```
+Numeric columns are treated as continuous values; text, boolean, and pandas
+`category` columns are treated as groups. Convert numeric labels, such as batch
+IDs, to `category`. `fit_screen()` regresses selected covariates out of
+expression before fitting. See the
+[API reference](api.md#covariates-and-fitting) for details.
+
+```python
+covariates = pd.read_csv(data_dir / "covariates.csv", index_col=0)
+covariates["batch"] = covariates["batch"].astype("category")
+
+screen = PerturbData(
+    X=X,
+    G=G,
+    control="Nontargeting",
+    covariates=covariates,
+)
+```
+</details>
 
 ??? example "Load from AnnData"
-    `load_screen()` reads an AnnData object, an H5AD file, or a Zarr store. It
-    uses `adata.X` for expression and `adata.obsm["G"]` for perturbation
-    assignments by default. Store `G` there as a named pandas DataFrame with
-    one row per cell in AnnData order and one column per perturbation. Use
-    `x_key` to read expression from a layer, `g_key` to select another
-    `obsm` entry, and `covariates` to select columns from `adata.obs`.
+    Use `load_screen()` to create a `PerturbData` object from an AnnData
+    object, H5AD file, or Zarr store. By default, it reads expression from
+    `adata.X` and perturbation assignments from `adata.obsm["G"]`.
+
+    Store `G` in `adata.obsm["G"]` as a named pandas DataFrame, with one row
+    per cell in AnnData order and one column per perturbation. To use other
+    data, set `x_key` to an expression layer, `g_key` to another `obsm` entry,
+    or `covariates` to columns in `adata.obs`.
 
     ```python
     from perturbvi import load_screen
@@ -113,16 +124,6 @@ screen = PerturbData(X=X, G=G)
 
     Omit `control=` if `G` already has all-zero control rows and no control
     column.
-
-### Covariates
-
-Numeric covariates are treated as continuous values. Text and boolean columns,
-and columns with pandas' `category` dtype, are treated as groups. If numbers
-label groups rather than measure amounts (for example, batch IDs), convert
-that column with `.astype("category")`; otherwise PerturbVI treats the numbers
-as a continuous trend. `fit_screen()` regresses selected covariates out of
-expression before fitting. See the
-[API reference](api.md#covariates-and-fitting) for details.
 
 ## Fit and save
 
@@ -146,7 +147,7 @@ for the remaining options.
 including `B`, `W`, and `BW`.
 
 ??? example "Replogle K562: genome-scale fit"
-    Place the prepared files in an `input` directory. `X` contains transformed
+    Place the prepared files in a `data` directory. `X` contains transformed
     expression (cells × genes); `G` contains binary guide assignments for the
     same cells in the same row order (cells × perturbations). The gene ID list
     must match the columns of `X` in order. Since genome-scale `G` is sparse,
