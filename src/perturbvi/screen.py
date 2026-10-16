@@ -130,7 +130,7 @@ class FitResults:
 
     ``W``, ``PIP_W``, ``B``, ``PIP_B``, ``BW``, and ``PVE`` are pandas
     DataFrames, computed on access. Pass the matrix needed to a plotting
-    function directly, e.g. ``plot_factor_effects(fit.B)``. Raw inference
+    function directly, e.g. ``plot_B(fit.B)``. Raw inference
     arrays remain accessible through ``inference``.
     """
 

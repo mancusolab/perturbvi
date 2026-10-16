@@ -118,9 +118,12 @@ The main model settings are:
 | `l_dim` | Number of single-gene effects available to build each program |
 | `tau` | Starting inverse noise level for expression; PerturbVI updates it during fitting |
 
-Numeric covariates are treated as measurements. Text, categorical, and boolean
-covariates are treated as groups. If a covariate overlaps with `G`, shared
-signal may be removed; perfectly confounded effects cannot be separated.
+Numeric covariates are treated as continuous values. Text and boolean columns,
+and columns with pandas' `category` dtype, are treated as groups. If numbers
+label groups rather than measure amounts, convert that column with
+`.astype("category")`; otherwise PerturbVI treats the numbers as a continuous
+trend. If a covariate overlaps with `G`, shared signal may be removed;
+perfectly confounded effects cannot be separated.
 To reuse corrected expression across fits, call `residualize_screen(data)`
 once and pass its result to `fit_screen()`. `fit_screen()` centers
 every gene. Set `standardize=True` to also scale genes to unit variance. It does not
@@ -152,7 +155,7 @@ if you will reuse it. Raw arrays remain available through `fit.inference`.
 ```python
 from perturbvi import plotting as pp
 
-fig = pp.plot_factor_effects(
+fig = pp.plot_B(
     fit.B,
     perturbations=["ADNP", "PTEN", "SETD5"],
     show_significance=False,
@@ -259,7 +262,9 @@ to compose plots and ordinary Matplotlib commands to customize the returned
 figure or axis labels.
 
 For gene heatmaps, `gene_annotations` accepts a DataFrame read directly from a
-CSV with `gene_ID`, `gene_name`, and `annotation` columns. No ordering index is
+CSV with `gene_ID`, `gene_name`, and `annotation` columns by default. Use
+`gene_annotation_columns` to map these roles to any input headers; for example,
+`{"gene_ID": "A", "gene_name": "B", "annotation": "C"}`. No ordering index is
 needed. Genes are automatically grouped by annotation, with groups in first-seen
 CSV order and unannotated genes last. Supply
 `genes=annotations["gene_ID"].tolist()` to preserve CSV order within groups, or
@@ -267,11 +272,29 @@ another gene list to choose the within-group order. Repeated annotations share
 a color and appear once in the two-column legend below the plot; annotation
 text is displayed verbatim.
 
+For example, when the annotation CSV uses `A`, `B`, and `C` as its headers:
+
+```python
+fig = pp.plot_W(
+    W,
+    gene_annotations=annotations,
+    gene_annotation_columns={"gene_ID": "A", "gene_name": "B", "annotation": "C"},
+    row_clustering="within_annotation",
+)
+```
+
+Rows and columns retain their supplied order by default. `row_clustering` and
+`column_clustering` accept `"none"` (default) or `"global"`; gene heatmaps also
+accept `row_clustering="within_annotation"`, which preserves first-seen group
+order and clusters genes within each group. Clustering uses Euclidean distance
+and Ward's method and reorders the heatmap without drawing dendrograms. It is
+applied after selecting genes, factors, or perturbations.
+
 | Function | Required DataFrame | Optional uncertainty input | Significance rule |
 |---|---|---|---|
-| `plot_factor_effects(B, ...)` | `B`: perturbations × factors | `pip=PIP_B` | PIP > 0.95 |
-| `plot_gene_loadings(W, ...)` | `W`: factors × genes | `pip=PIP_W` | PIP > 0.95 |
-| `plot_gene_effects(BW, ...)` | `BW`: perturbations × genes | `lfsr=LFSR_BW` | LFSR < 0.05 |
+| `plot_B(B, ...)` | `B`: perturbations × factors | `pip=PIP_B` | PIP > 0.95 |
+| `plot_W(W, ...)` | `W`: factors × genes | `pip=PIP_W` | PIP > 0.95 |
+| `plot_BW(BW, ...)` | `BW`: perturbations × genes | `lfsr=LFSR_BW` | LFSR < 0.05 |
 
 Dots are off by default (`show_significance=False`). Set the flag to `True`
 and supply the corresponding uncertainty matrix to show them. The effect and
@@ -282,7 +305,7 @@ transposes internally. No model loading, file loading, or sampling occurs.
 ```python
 from perturbvi import plotting as pp
 
-fig = pp.plot_gene_effects(
+fig = pp.plot_BW(
     BW,
     genes=genes,
     perturbations=["ADNP", "PTEN", "SETD5"],
@@ -291,15 +314,14 @@ fig = pp.plot_gene_effects(
 )
 ```
 
-::: perturbvi.plotting.plot_factor_effects
+::: perturbvi.plotting.plot_B
 
-::: perturbvi.plotting.plot_gene_loadings
+::: perturbvi.plotting.plot_W
 
-::: perturbvi.plotting.plot_gene_effects
+::: perturbvi.plotting.plot_BW
 
-Selected matrices and color settings are recorded in `fig.perturbvi_data`,
-with one record per heatmap. Biological labels/groups are optional user-supplied
-tables. Enrichment and its visualization use direct R code in the tutorial.
+Biological labels and groups are optional user-supplied tables. Enrichment and
+its visualization use direct R code in the tutorial.
 
 ## Using arrays directly
 

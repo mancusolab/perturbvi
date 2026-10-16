@@ -1,137 +1,128 @@
 # Using PerturbVI with Your Data
 
-Start with an expression matrix and perturbation assignments for the same cells.
+PerturbVI fits transformed expression together with a binary perturbation
+assignment matrix. It does not preprocess raw counts, select genes, or call
+guides; prepare those inputs before fitting.
 
-## 1. Set up
+For raw-count data, perform quality control, normalization, and gene selection
+before creating `X`. SCTransform v2 is one option for count normalization and
+variance stabilization; see the
+[SCTransform v2 guide](https://satijalab.org/seurat/archive/v4.3/sctransform_v2_vignette).
+
+## Install
 
 ```bash
-uv pip install perturbvi matplotlib
+uv pip install perturbvi
 ```
+
+## Prepare a screen
+
+`X` has cells on rows and genes on columns. `G` has the same cells, in the
+same order, on rows and perturbations on columns. Each entry of `G` is `0` or
+`1`; a cell with multiple perturbations has a `1` in each corresponding
+column. Give genes and perturbations unique column names.
+
+Control cells should have all-zero rows in `G`. If `G` has a control column,
+pass its name as `control` so PerturbVI drops it before fitting. If controls
+are already represented by all-zero rows, leave `control` unset.
+
+### CSV or TSV files
+
+Use cell IDs as the row index in each file. For TSV files, add `sep="\t"` to
+`read_csv()`.
 
 ```python
 from pathlib import Path
 
 import pandas as pd
-from perturbvi import PerturbData, fit_screen, load_screen, save_results
+from perturbvi import PerturbData
 
 data_dir = Path("data")
-result_dir = Path("results")
-```
-
-## 2. Prepare the inputs
-
-| Input | Rows × columns | Contents |
-|---|---|---|
-| `X` | Cells × genes | Transformed expression |
-| `G` | Cells × perturbations | Binary target or guide assignments |
-| `covariates`, optional | Cells × covariates | Variables to regress out of expression |
-
-Keep cells in the same order in every input, with unique gene and perturbation
-names.
-
-### Controls and multiple perturbations
-
-In `G`, use 1 when a cell has a perturbation and 0 otherwise. Cells with
-multiple perturbations have multiple 1s:
-
-| Cell assignment | `G[CEBPE]` | `G[RUNX1T1]` |
-|---|---:|---:|
-| Control | 0 | 0 |
-| CEBPE | 1 | 0 |
-| RUNX1T1 | 0 | 1 |
-| CEBPE + RUNX1T1 | 1 | 1 |
-
-If `G` has a control column, `control="Nontargeting"` drops that column so the
-control is not fitted as a perturbation; the control cells stay as all-zero
-rows and serve as the baseline.
-
-### CSV or TSV
-
-Use cell IDs as row labels and gene or perturbation names as column headers.
-For TSV files, add `sep="\t"` to `pd.read_csv()`.
-
-```python
 X = pd.read_csv(data_dir / "expression.csv", index_col=0)
 G = pd.read_csv(data_dir / "perturbations.csv", index_col=0)
 
-data = PerturbData(X=X, G=G)
+data = PerturbData(X=X, G=G, control="Nontargeting")
 ```
 
-??? example "NumPy or sparse arrays"
-    With arrays, provide the gene and perturbation names separately.
+Omit `control=` when `G` is already baseline-free.
 
-    ```python
-    data = PerturbData(
-        X=X_arr,
-        G=G_arr,
-        gene_names=gene_names,
-        perturbation_names=perturbation_names,
-    )
-    ```
-
-### AnnData
-
-`load_screen()` reads AnnData objects, H5AD files, and AnnData Zarr folders.
-It expects:
-
-| Location | Contents |
-|---|---|
-| `adata.X` | Transformed expression; alternatively use a named layer |
-| `adata.obs_names` | Cell identifiers |
-| `adata.var_names` | Gene identifiers |
-| `adata.obsm["G"]` | Binary pandas DataFrame, indexed by cell and with named columns |
-| `adata.obs`, optional | Covariate columns |
-
-```python
-data = load_screen(data_dir / "screen.h5ad")
-```
-
-You can also pass an already loaded AnnData object. To read expression from
-`adata.layers["transformed"]`, set `x_key="transformed"`. To read assignments
-from `adata.obsm["perturbations"]`, set `g_key="perturbations"`.
-
-??? example "Build G from one target label per cell"
-    Here `adata.obs["target"]` contains target names and the label `control`.
-
-    ```python
-    adata.obsm["G"] = adata.obs["target"].str.get_dummies().astype(int)
-
-    data = load_screen(adata, control="control")
-    ```
-
-### Covariates
-
-Pass covariates such as batch or mitochondrial percentage to adjust expression
-before fitting; `fit_screen()` performs the regression. Numeric columns are
-continuous, while text, categorical, and boolean columns define groups, so
-convert numbered batches to `category`.
-
-??? example "Covariates from AnnData or a CSV"
-    With AnnData, provide column names from `adata.obs`:
-
-    ```python
-    data = load_screen(
-        data_dir / "screen.h5ad",
-        covariates=["batch", "percent_mito"],
-    )
-    ```
-
-    With DataFrames, provide an aligned covariate table:
+??? example "Add covariates"
+    Load covariates with the same cell IDs and row order as `X` and `G`, then
+    pass the DataFrame to `PerturbData`:
 
     ```python
     covariates = pd.read_csv(data_dir / "covariates.csv", index_col=0)
     covariates["batch"] = covariates["batch"].astype("category")
 
     data = PerturbData(
-        X=expression,
+        X=X,
         G=G,
+        control="Nontargeting",
         covariates=covariates,
     )
     ```
 
-## 3. Dataset examples
+??? example "Load data from AnnData"
+    `load_screen()` reads an AnnData object, an H5AD file, or a Zarr store. It
+    uses `adata.X` for expression and `adata.obsm["G"]` for perturbation
+    assignments by default. Store `G` there as a named pandas DataFrame with
+    one row per cell in AnnData order and one column per perturbation. Use
+    `x_key` to read expression from a layer, `g_key` to select another
+    `obsm` entry, and `covariates` to select columns from `adata.obs`.
 
-??? example "Replogle K562: genome-scale screen"
+    ```python
+    from perturbvi import load_screen
+
+    data = load_screen(
+        "data/screen.h5ad",
+        x_key="transformed",
+        control="Nontargeting",
+        covariates=["batch"],
+    )
+    ```
+
+    Omit `control=` if `G` already has all-zero control rows and no control
+    column.
+
+### Covariates
+
+Numeric covariates are treated as continuous values. Text and boolean columns,
+and columns with pandas' `category` dtype, are treated as groups. If numbers
+label groups rather than measure amounts (for example, batch IDs), convert
+that column with `.astype("category")`; otherwise PerturbVI treats the numbers
+as a continuous trend. `fit_screen()` regresses selected covariates out of
+expression before fitting. See the
+[API reference](api.md#covariates-and-fitting) for details.
+
+## Fit and save
+
+Both input routes create a `PerturbData` object called `data`. Fit and save it
+like this:
+
+```python
+from perturbvi import fit_screen, save_results
+
+fit = fit_screen(data, z_dim=20, l_dim=1000, init="pca")
+save_results(fit, "results")
+```
+
+`z_dim` sets the number of latent factors. `l_dim` sets the number of
+single-effect components available to each factor. `init` can be `"pca"` or
+`"random"`. Genes are centered by default; set `standardize=True` to also
+scale them to unit variance. See the [API reference](api.md#covariates-and-fitting)
+for the remaining options.
+
+`save_results()` writes the fitted model and labeled result matrices,
+including `B`, `W`, and `BW`.
+
+??? example "Replogle K562: genome-scale fit"
+    Place the prepared files in an `input` directory. `X` contains transformed
+    expression (cells × genes); `G` contains binary guide assignments for the
+    same cells in the same row order (cells × perturbations). The gene ID list
+    must match the columns of `X` in order. Since genome-scale `G` is sparse,
+    the example converts it to JAX's [sparse BCOO format](https://docs.jax.dev/en/latest/_autosummary/jax.experimental.sparse.BCOO.html)
+    before fitting.
+
     ```python
     from pathlib import Path
 
@@ -148,7 +139,7 @@ convert numbered batches to `category`.
 
     Z_DIM, L_DIM, TAU, INIT = 20, 1000, 1, "pca"
 
-    DATA = Path("input")
+    DATA = Path("data")
     MATRIX = DATA / "K562_essential_resid.h5ad"
     GUIDE = DATA / "wide_df.csv"
     BACKGROUND = DATA / "K562_essential_downstream_gene.tsv"
@@ -160,14 +151,13 @@ convert numbered batches to `category`.
     guides = guides.drop(columns=DROP_COLS, errors="ignore")
     background_genes = pd.read_csv(BACKGROUND, sep="\t")["gene_id"].tolist()
 
+    # Pass X and G as numeric arrays; provide their column labels separately.
     screen = PerturbData(
         X=jnp.asarray(adata.X, dtype=jnp.float64),
         G=sparse.bcoo_fromdense(jnp.asarray(guides.to_numpy(), dtype=jnp.float64)),
         gene_names=background_genes,
         perturbation_names=guides.columns.tolist(),
     )
-
-    del adata, guides
 
     fit = fit_screen(
         screen,
@@ -182,212 +172,9 @@ convert numbered batches to `category`.
     )
 
     save_results(fit, OUTPUT)
-    del fit
-
     lfsr_bw = estimate_lfsr(OUTPUT)
     lfsr_bw.to_csv(OUTPUT / "LFSR_BW.csv")
     ```
 
-??? example "Preprocess raw counts"
-    Install Scanpy and define this function before running an example:
-
-    ```bash
-    uv pip install scanpy
-    ```
-
-    ```python
-    import anndata as ad
-    import scanpy as sc
-
-    def transform_counts(
-        adata: ad.AnnData,
-        n_top_genes: int = 6_000,
-        min_genes: int = 200,
-        min_cells: int = 3,
-        max_pct_mt: float = 20.0,
-    ) -> ad.AnnData:
-        adata = adata.copy()
-        adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
-
-        sc.pp.calculate_qc_metrics(
-            adata,
-            qc_vars=["mt"],
-            percent_top=None,
-            log1p=False,
-            inplace=True,
-        )
-        sc.pp.filter_cells(adata, min_genes=min_genes)
-        adata = adata[adata.obs["pct_counts_mt"] < max_pct_mt].copy()
-        sc.pp.filter_genes(adata, min_cells=min_cells)
-
-        sc.experimental.pp.highly_variable_genes(
-            adata,
-            flavor="pearson_residuals",
-            n_top_genes=min(n_top_genes, adata.n_vars),
-            subset=True,
-        )
-        sc.experimental.pp.normalize_pearson_residuals(adata)
-        return adata
-    ```
-
-Filters cells and genes, selects up to 6,000 genes by Pearson-residual
-variance, and replaces `adata.X` with Pearson residuals.
-
-??? example "Datlinger CROP-seq: one target per cell"
-    In the [Datlinger dataset](https://www.nature.com/articles/nmeth.4177),
-    missing target labels identify controls. Replicate is categorical.
-
-    ```python
-    adata = ad.read_h5ad(data_dir / "DatlingerBock2017.h5ad")
-    adata.obs["target"] = adata.obs["target"].astype("string").fillna("control")
-    adata.obs["replicate"] = adata.obs["replicate"].astype("category")
-    adata = transform_counts(adata)
-
-    adata.obsm["G"] = adata.obs["target"].str.get_dummies().astype(int)
-
-    data = load_screen(
-        adata,
-        control="control",
-        covariates=["replicate", "percent_mito"],
-    )
-
-    result_dir = Path("results/datlinger")
-    ```
-
-??? example "Adamson CRISPRi: collapse guides to target genes"
-    The [Adamson dataset](https://pmc.ncbi.nlm.nih.gov/articles/PMC5315571/)
-    stores labels such as `CREB1_pDS269`. Use the text before `_` as the target;
-    `62(mod)` denotes controls and `*` labels are excluded.
-
-    ```python
-    adata = ad.read_h5ad(
-        data_dir / "AdamsonWeissman2016_GSM2406675_10X001.h5ad"
-    )
-    labels = adata.obs["perturbation"].astype("string").str.split("_", n=1).str[0]
-    adata.obs["target"] = labels.replace({"62(mod)": "control"}).mask(labels == "*")
-    adata = adata[adata.obs["target"].notna()].copy()
-    adata = transform_counts(adata)
-
-    adata.obsm["G"] = adata.obs["target"].str.get_dummies().astype(int)
-    data = load_screen(
-        adata,
-        control="control",
-        covariates=["percent_ribo"],
-    )
-
-    result_dir = Path("results/adamson")
-    ```
-
-??? example "Norman CRISPRa: single targets and target pairs"
-In the [Norman dataset](https://doi.org/10.1126/science.aax4438), split
-target-pair labels such as `CEBPE_RUNX1T1` into two columns; controls have
-all-zero rows.
-
-    ```python
-    adata = ad.read_h5ad(data_dir / "NormanWeissman2019_filtered.h5ad")
-    adata.obs["gemgroup"] = adata.obs["gemgroup"].astype("category")
-    adata = transform_counts(adata)
-
-    labels = adata.obs["perturbation"].astype("string")
-    G = labels.mask(labels == "control", "").str.get_dummies(sep="_").astype("int8")
-    assert (G.sum(axis=1).to_numpy() == adata.obs["nperts"].to_numpy()).all()
-
-    data = PerturbData(
-        X=adata.X,
-        G=G,
-        gene_names=adata.var_names,
-        covariates=adata.obs[["gemgroup", "percent_mito"]],
-    )
-
-    result_dir = Path("results/norman")
-    ```
-
-??? example "A375 10x CRISPR: count matrix and a separate calls table"
-    This example uses a control/RAB1A subset. Prepare a barcode-indexed TSV
-    containing `perturbation`, `log_total_counts`, and `percent_mito`.
-    The H5 file supplies counts; final perturbation calls come from your
-    upstream calling pipeline.
-
-    ```python
-    matrix = sc.read_10x_h5(
-        data_dir / "a375_1k_filtered_feature_bc_matrix.h5",
-        gex_only=False,
-    )
-    adata = matrix[:, matrix.var["feature_types"] == "Gene Expression"].copy()
-    adata.var_names_make_unique()
-
-    calls = pd.read_csv(data_dir / "a375_10x_h5_metadata.tsv", sep="\t", index_col=0)
-    calls.index = calls.index.astype(str)
-    calls = calls[calls["perturbation"].isin(["control", "RAB1A"])]
-    adata = adata[calls.index].copy()
-    adata.obs = adata.obs.join(calls)
-    adata.obs["perturbation"] = adata.obs["perturbation"].astype("category")
-    adata = transform_counts(adata)
-
-    adata.obsm["G"] = (adata.obs["perturbation"] == "RAB1A").astype(int).to_frame(name="RAB1A")
-    data = load_screen(
-        adata,
-        covariates=["log_total_counts", "percent_mito"],
-    )
-
-    result_dir = Path("results/a375")
-    ```
-
-## 4. Fit and save
-
-Fit the model using the `data` prepared above:
-
-```python
-fit = fit_screen(
-    data,
-    z_dim=20,
-    l_dim=1000,
-    init="pca"
-)
-
-save_results(fit, result_dir)
-```
-
-| Setting | Meaning |
-|---|---|
-| `z_dim` | Number of latent factors |
-| `l_dim` | Number of single-effect loading components per factor |
-| `init` | Initialization: `"pca"` or `"random"` |
-
-Adjust the number of factors and loading components for your analysis.
-Genes are centered automatically; set `standardize=True` to also scale each
-gene to unit variance.
-
-See the [API reference](api.md#covariates-and-fitting) for all fitting options.
-
-??? example "Fit from the command line"
-    For an H5AD file with transformed expression in `X` and perturbation
-    assignments in `obsm["G"]`:
-
-    ```bash
-    perturbvi fit data/screen.h5ad --output results --z-dim 20 --l-dim 1000
-    ```
-
-    Add `--control Nontargeting` if that reference column should be dropped.
-    Run `perturbvi fit --help` for layer and covariate options.
-
-??? note "Reuse covariate-corrected expression across fits"
-    When fitting the same data several times, you can correct expression once:
-
-    ```python
-    from perturbvi import residualize_screen
-
-    resid = residualize_screen(data)
-
-    fit = fit_screen(
-        resid,
-        z_dim=20,
-        l_dim=1000,
-        init="pca"
-    )
-    ```
-
-## 5. Plot and interpret results
-
-The [LUHMES notebook](luhmes.ipynb) shows how to plot and interpret the results,
-count significant genes, and run GO enrichment.
+The [LUHMES notebook](luhmes.ipynb) shows how to plot and interpret the saved
+matrices and run biological-process enrichment.
