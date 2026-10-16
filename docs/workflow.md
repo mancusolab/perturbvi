@@ -137,11 +137,9 @@ fit = fit_screen(screen, z_dim=20, l_dim=1000, init="pca")
 save_results(fit, "results")
 ```
 
-`z_dim` sets the number of latent factors. `l_dim` sets the number of
-single-effect components available to each factor. `init` can be `"pca"` or
-`"random"`. Genes are centered by default; set `standardize=True` to also
-scale them to unit variance. See the [API reference](api.md#covariates-and-fitting)
-for the remaining options.
+`z_dim` is the number of latent factors. `l_dim` is the number of single-effect
+components per factor. `init` can be `"pca"` or `"random"`. See the
+[API reference](api.md#covariates-and-fitting) for the remaining options.
 
 `save_results()` writes the fitted model and labeled result matrices,
 including `B`, `W`, and `BW`.
