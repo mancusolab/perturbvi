@@ -241,13 +241,8 @@ and `keep_default_na=False` for the first column.
 
 ## Plot interpretation tables
 
-Install Matplotlib for plotting:
-
-```bash
-uv pip install matplotlib
-```
-
-Each function accepts one labeled DataFrame and returns a Matplotlib Figure.
+Matplotlib is installed with PerturbVI. Each plotting function accepts one
+labeled DataFrame and returns a Matplotlib Figure.
 Read the corresponding CSV directly, or pass `fit.B`, `fit.W`, or `fit.BW`.
 Full matrices and explicit subsets use the same functions. See the
 [LUHMES Analysis with PerturbVI](luhmes.ipynb).

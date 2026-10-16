@@ -24,7 +24,7 @@ not select genes or call guides.
 ## Install
 
 ```bash
-uv pip install perturbvi matplotlib
+uv pip install perturbvi
 ```
 
 ## Create the `PerturbData` object

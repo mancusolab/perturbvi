@@ -21,7 +21,7 @@ PerturbVI infers latent gene programs and their perturbation effects from single
 ## Installation
 
 ```bash
-uv pip install perturbvi matplotlib
+uv pip install perturbvi
 ```
 
 ## Quick start
