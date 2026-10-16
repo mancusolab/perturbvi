@@ -1,35 +1,53 @@
 # Using PerturbVI with Your Data
 
-PerturbVI fits transformed expression together with a binary perturbation
-assignment matrix. It does not preprocess raw counts, select genes, or call
-guides; prepare those inputs before fitting.
+PerturbVI uses transformed gene expression and the perturbations assigned to
+each cell:
 
-For raw-count data, perform quality control, normalization, and gene selection
-before creating `X`. SCTransform v2 is one option for count normalization and
-variance stabilization; see the
-[SCTransform v2 guide](https://satijalab.org/seurat/archive/v4.3/sctransform_v2_vignette).
+| Input | Contains | Rows × columns |
+|---|---|---|
+| `X` | Transformed gene-expression values | Cells × genes |
+| `G` | Perturbation assignments (`1` = assigned, `0` = not assigned) | Cells × perturbations |
+
+Rows in `X` and `G` must refer to the same cells in the same order. A cell
+assigned to multiple perturbations has multiple `1`s in its row of `G`.
+To preprocess raw counts, use an established method such as
+[SCTransform v2](https://satijalab.org/seurat/archive/v4.3/sctransform_v2_vignette)
+and pass the resulting transformed expression matrix as `X`. PerturbVI does
+not select genes or call guides.
+
+**In this workflow**
+
+1. [Install](#install)
+2. [Create the `PerturbData` object](#create-the-perturbdata-object)
+3. [Fit and save](#fit-and-save)
 
 ## Install
 
 ```bash
-uv pip install perturbvi
+uv pip install perturbvi matplotlib
 ```
 
-## Prepare a screen
+## Create the `PerturbData` object
 
-`X` has cells on rows and genes on columns. `G` has the same cells, in the
-same order, on rows and perturbations on columns. Each entry of `G` is `0` or
-`1`; a cell with multiple perturbations has a `1` in each corresponding
-column. Give genes and perturbations unique column names.
+Before fitting, create a `PerturbData` object and pass it to `fit_screen()`.
+Choose one of these input routes:
 
-Control cells should have all-zero rows in `G`. If `G` has a control column,
-pass its name as `control` so PerturbVI drops it before fitting. If controls
-are already represented by all-zero rows, leave `control` unset.
+| Input format | Create the object with |
+|---|---|
+| Expression and perturbation CSV or TSV files | `PerturbData(X=X, G=G)` |
+| AnnData object, H5AD file, or Zarr store | `load_screen(...)` |
+
+Both calls return a `PerturbData` object for `fit_screen()`.
 
 ### CSV or TSV files
 
-Use cell IDs as the row index in each file. For TSV files, add `sep="\t"` to
-`read_csv()`.
+Format the files like this:
+
+- One row per cell; put cell IDs in the first column of both files.
+- Use genes as columns of `X` and perturbations as columns of `G`.
+- Load cell IDs with `index_col=0`; `PerturbData` checks IDs and row order.
+
+If `G` has a `Nontargeting` column, pass `control="Nontargeting"`:
 
 ```python
 from pathlib import Path
@@ -41,10 +59,22 @@ data_dir = Path("data")
 X = pd.read_csv(data_dir / "expression.csv", index_col=0)
 G = pd.read_csv(data_dir / "perturbations.csv", index_col=0)
 
-data = PerturbData(X=X, G=G, control="Nontargeting")
+screen = PerturbData(X=X, G=G, control="Nontargeting")
 ```
 
-Omit `control=` when `G` is already baseline-free.
+`control="Nontargeting"` removes that reference column. Drop any other columns
+you do not want to model directly from `G`, for example:
+
+```python
+G = G.drop(columns=["unused_column"])
+```
+
+Cells assigned only to the non-targeting control then have all-zero rows in
+the remaining `G`. If you already removed the control column, omit `control`:
+
+```python
+screen = PerturbData(X=X, G=G)
+```
 
 ??? example "Add covariates"
     Load covariates with the same cell IDs and row order as `X` and `G`, then
@@ -54,7 +84,7 @@ Omit `control=` when `G` is already baseline-free.
     covariates = pd.read_csv(data_dir / "covariates.csv", index_col=0)
     covariates["batch"] = covariates["batch"].astype("category")
 
-    data = PerturbData(
+    screen = PerturbData(
         X=X,
         G=G,
         control="Nontargeting",
@@ -62,7 +92,7 @@ Omit `control=` when `G` is already baseline-free.
     )
     ```
 
-??? example "Load data from AnnData"
+??? example "Load from AnnData"
     `load_screen()` reads an AnnData object, an H5AD file, or a Zarr store. It
     uses `adata.X` for expression and `adata.obsm["G"]` for perturbation
     assignments by default. Store `G` there as a named pandas DataFrame with
@@ -73,7 +103,7 @@ Omit `control=` when `G` is already baseline-free.
     ```python
     from perturbvi import load_screen
 
-    data = load_screen(
+    screen = load_screen(
         "data/screen.h5ad",
         x_key="transformed",
         control="Nontargeting",
@@ -96,13 +126,13 @@ expression before fitting. See the
 
 ## Fit and save
 
-Both input routes create a `PerturbData` object called `data`. Fit and save it
-like this:
+After preparing `screen` from either input format, fit the model and save the
+results:
 
 ```python
 from perturbvi import fit_screen, save_results
 
-fit = fit_screen(data, z_dim=20, l_dim=1000, init="pca")
+fit = fit_screen(screen, z_dim=20, l_dim=1000, init="pca")
 save_results(fit, "results")
 ```
 
